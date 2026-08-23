@@ -73,6 +73,17 @@
     // big enough that the kit reads at board scale (a 128 px sprite drawn at
     // 34 px was the old rig again); rig.reach is the scaled radius of the
     // farthest solid pixel from the pivot, so rings and labels clear the kit.
+    // A scratch surface: OffscreenCanvas in a Worker, a detached <canvas> on a
+    // page (client/global.html runs this core on the main thread).
+    function scratchCanvas(w, h) {
+      if (typeof OffscreenCanvas === 'function') return new OffscreenCanvas(w, h);
+      if (typeof document !== 'undefined' && document.createElement) {
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        return c;
+      }
+      return null;
+    }
     var RigBodyPx = 60;
     var RigSolidAlpha = 200;
     var rigs = {};

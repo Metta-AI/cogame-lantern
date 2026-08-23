@@ -216,6 +216,29 @@ function smokeCanvasBitmapSize() {
   if (canvas.width !== 800 || canvas.height !== 400) {
     fail('setViewportSize did not resize the bitmap: ' + canvas.width + 'x' + canvas.height);
   }
+  // Exercise the lit-mask and light paths with a stub OffscreenCanvas, so a
+  // helper that is referenced but not defined (it happened: a rebase dropped
+  // scratchCanvas and every hosted replay showed "scratchCanvas is not
+  // defined") throws HERE rather than in the browser.
+  sandbox.OffscreenCanvas = function (w, h) {
+    this.width = w; this.height = h;
+    this.getContext = () => context;
+  };
+  context.createImageData = (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+  context.getImageData = (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+  context.createRadialGradient = () => ({ addColorStop: noop });
+  context.createPattern = () => ({});
+  try {
+    core.ingest(JSON.stringify({ type: 'meta', map: { obstacles: [], pen: null },
+      config: { lanternRangePx: 420, lanternConeBrads: 18 }, tick_count: 1 }));
+    core.ingest(JSON.stringify({ type: 'frame', tick: 0, act: 'hunt', cogs: [
+      { alias: 'Owl-1', team: 'Owl', role: 'seeker', x: 100, y: 100, aim: 0, state: 0 },
+      { alias: 'Moth-1', team: 'Moth', role: 'hider', x: 300, y: 100, aim: 0, state: 0, lit: true }
+    ], crates: [], sounds: [], hb: [], bursts: [] }));
+    core.setLitMask(new Uint8Array(155 * 83).fill(1), 155, 83, 8);
+  } catch (error) {
+    fail('broadcast_core threw while drawing a lit frame: ' + error.message);
+  }
   console.log('  board bitmap OK: sized to the viewport at create and on resize');
 }
 
