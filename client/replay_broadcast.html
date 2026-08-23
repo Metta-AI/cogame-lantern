@@ -715,143 +715,6 @@ html, body {
   image-rendering: pixelated;
 }
 
-/* ---------- 4b. VIEW CONTROLS (zoom + minimap) ----------
-   One group, top-right, under the reserved scorebug band: the minimap sits
-   directly over the control that summoned it, so "where am I" and "how far in
-   am I" read as a single instrument instead of two scattered widgets.
-   The board is NOT scroll-zoomed — a trackpad two-finger scroll belongs to the
-   page — so these controls are the primary way in, not a fallback, and they are
-   always present. The minimap only appears once there is something off-screen
-   to locate (zoom > 1); at fit it would just be the board again, smaller. */
-#viewpanel {
-  position: absolute;
-  top: calc(var(--topband, 0px) + 10 * var(--u));
-  right: calc(12 * var(--u));
-  z-index: 11;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: calc(5 * var(--u));
-  font-family: var(--pixfont);
-  /* Minimap and zoom bar share ONE width so the pair reads as a single stacked
-     instrument rather than two overlays that happen to be near each other.
-     The px floor is a TOUCH floor: chrome otherwise scales with the embed, and
-     a 300px-wide Observatory card would shrink the buttons below a fingertip. */
-  --viewpanel-w: max(calc(178 * var(--u)), 132px);
-}
-
-/* Board minimap. Aspect + display come from the STREAMED board's real w/h
-   (syncMinimapShape), because a four-team board is square and a fixed 1.874:1
-   inset would squash it. See-through so it reads as an overlay on play. */
-#minimap {
-  position: relative;
-  width: var(--viewpanel-w);
-  aspect-ratio: 1235 / 659;
-  background: rgba(8, 5, 3, 0.5);
-  box-shadow: 0 0 0 1px rgba(232, 163, 61, 0.3);
-  overflow: hidden;
-  cursor: crosshair;
-  display: none;
-}
-#minimap.on { display: block; }
-#minimap canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-/* The label rides INSIDE the frame rather than adding a header row above it —
-   one element, not two stacked boxes. */
-#minimap .mm-cap {
-  position: absolute;
-  left: calc(4 * var(--u));
-  bottom: calc(2 * var(--u));
-  font-size: calc(7 * var(--u));
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--paper-dim);
-  text-shadow: 0 1px 2px rgba(8, 5, 3, 0.9);
-  pointer-events: none;
-}
-
-#zoombar {
-  display: flex;
-  align-items: center;
-  gap: calc(5 * var(--u));
-  width: var(--viewpanel-w);
-  padding: calc(3 * var(--u)) calc(5 * var(--u));
-  /* Opaque enough that the buttons keep their contrast over pale concrete —
-     a control you have to hunt for on a bright floor is not a control. */
-  background: rgba(12, 9, 6, 0.82);
-  box-shadow: 0 0 0 1px rgba(232, 163, 61, 0.22);
-}
-.zbtn {
-  font-family: var(--pixfont);
-  font-size: calc(14 * var(--u));
-  line-height: 1;
-  color: var(--paper);
-  background: rgba(242, 232, 216, 0.08);
-  border: none;
-  flex: none;
-  width: max(calc(20 * var(--u)), 22px);
-  height: max(calc(18 * var(--u)), 20px);
-  cursor: pointer;
-  padding: 0;
-}
-.zbtn:hover { background: rgba(242, 232, 216, 0.22); }
-.zbtn:disabled { opacity: 0.3; cursor: default; background: rgba(242, 232, 216, 0.05); }
-/* Zoom is geometric (1x..12x); the slider's travel is the LOG of it, so equal
-   thumb movement is equal perceived zoom rather than a dead left half. */
-#zoom-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-  margin: 0;
-  height: calc(2 * var(--u));
-  background: rgba(242, 232, 216, 0.22);
-  cursor: pointer;
-}
-#zoom-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: calc(9 * var(--u));
-  height: calc(13 * var(--u));
-  background: var(--amber);
-  cursor: grab;
-}
-#zoom-slider::-moz-range-thumb {
-  width: calc(9 * var(--u));
-  height: calc(13 * var(--u));
-  border: none;
-  border-radius: 0;
-  background: var(--amber);
-  cursor: grab;
-}
-#zoom-slider:focus-visible { outline: 1px solid var(--amber); outline-offset: calc(3 * var(--u)); }
-/* Never a bare number: the readout carries its unit, and "FIT" names the state
-   the board opens in instead of showing a meaningless 1.0x. */
-#zoom-read {
-  font: inherit;
-  font-size: max(calc(9 * var(--u)), 9px);
-  letter-spacing: 0.06em;
-  color: var(--paper-dim);
-  background: none;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-  flex: none;
-  width: max(calc(26 * var(--u)), 26px);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-#zoom-read.zoomed { color: var(--amber); }
-#zoom-read:hover { color: var(--paper); }
-#zoom-read:focus-visible { outline: 1px solid var(--amber); outline-offset: calc(3 * var(--u)); }
-
 /* ---------- 5. TRANSPORT ---------- */
 #transport {
   position: absolute;
@@ -1470,15 +1333,6 @@ body[data-embed] #grain,
 body[data-embed] #status { display: none !important; }
 body[data-embed] #board { top: 0; height: 100%; }
 
-/* Opt-OUT of the #viewpanel overlay (zoom bar + minimap) by param only:
-   ?viewpanel=0 sets body[data-noviewpanel]. Defaults are unchanged everywhere
-   — the League Replayer shell loads the board with ?embed=1 and KEEPS zoom +
-   minimap (that's why #271 blanket-hiding the panel in all embeds was reverted
-   in #272). Only surfaces that explicitly ask — billboards (Lobby hero) and
-   thumbnail capture — append &viewpanel=0 to drop the panel. Independent of
-   embed: the two params don't touch each other. */
-body[data-noviewpanel] #viewpanel { display: none !important; }
-
 /* ============================================================
    LANTERN ADDITIONS. Everything above this line is paintbot's
    broadcast chrome, carried across verbatim except for the two
@@ -1566,14 +1420,13 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
 }
 
 /* 360 px floor: the featured-match iframe is about that wide. Collapse the
-   heartbeat bars to dots, drop the minimap/zoom panel and the speed-chip
+   heartbeat bars to dots, drop the speed-chip
    labels, and cut the feed to two lines. */
 @media (max-width: 640px) {
   #heartbar { right: calc(3 * var(--u)); gap: calc(3 * var(--u)); }
   #heartbar .hbar { width: calc(8 * var(--u)); height: calc(8 * var(--u)); border-radius: 50%; }
   #heartbar .hbar i { width: 100% !important; opacity: 0.25; }
   #heartbar .hbar.b2 i, #heartbar .hbar.b3 i, #heartbar .hbar.b4 i { opacity: 1; }
-  #viewpanel { display: none !important; }
   #speedchips .chip-label { display: none; }
   #killfeed { max-height: calc(2 * 20 * var(--u)); overflow: hidden; }
   #actchip { font-size: calc(9 * var(--u)); }
@@ -1627,20 +1480,6 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
     <!-- One proximity bar per seeker, straight off the keyframe `hb` array -
          exactly the five-band reading that seeker was given. -->
     <div id="heartbar"></div>
-
-    <div id="viewpanel">
-      <div id="minimap" title="Click or drag to move the view">
-        <canvas id="minimap-canvas"></canvas>
-        <span class="mm-cap">View</span>
-      </div>
-      <div id="zoombar" role="group" aria-label="Board zoom">
-        <button class="zbtn" id="zoom-out" title="Zoom out (x)" aria-label="Zoom out">&minus;</button>
-        <input id="zoom-slider" type="range" min="0" max="1000" step="1" value="0"
-               aria-label="Board zoom" aria-valuetext="Fitted">
-        <button class="zbtn" id="zoom-in" title="Zoom in (z)" aria-label="Zoom in">+</button>
-        <button id="zoom-read" type="button" title="Fit the board (0)" aria-label="Fit the board">FIT</button>
-      </div>
-    </div>
 
     <div id="mmwarn">Replay digest mismatch &mdash; showing recorded inputs</div>
     <div id="bannerlane"></div>
@@ -1916,20 +1755,7 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
         onMeta: onMeta,
         onStatus: function (s) { $('status').textContent = s; },
         onFirstFrame: function () { $('status').classList.remove('show'); },
-        onTransform: function (t) {
-          var zoom = (t && t.zoom) || 1;
-          var fitted = zoom <= 1.001;
-          var slider = $('zoom-slider');
-          if (slider && document.activeElement !== slider) {
-            slider.value = String(Math.round(((zoom - 1) / 11) * 1000));
-          }
-          if (slider) slider.setAttribute('aria-valuetext', fitted ? 'Fitted' : zoom.toFixed(1) + 'x');
-          var read = $('zoom-read');
-          if (read) {
-            read.textContent = fitted ? 'FIT' : zoom.toFixed(1) + 'x';
-            read.classList.toggle('zoomed', !fitted);
-          }
-        }
+        onTransform: function () { }
       })
     : null;
   if (!core) {
@@ -1957,25 +1783,9 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
     var fraction = (event.clientX - rect.left) / Math.max(1, rect.width);
     core.sendCommand('s:' + Math.round(fraction * meta.tick_count));
   };
-  // The slider and the readout follow the core's ACTUAL zoom (see
-  // onTransform above), so the +/- buttons, the FIT button and the slider all
-  // agree; the slider itself only ever sends a level.
-  $('zoom-in').onclick = function () { core.zoomAt(1.25); };
-  $('zoom-out').onclick = function () { core.zoomAt(0.8); };
-  $('zoom-read').onclick = function () { core.resetView(); };
-  $('zoom-slider').oninput = function () {
-    core.setZoom(1 + (Number(this.value) / 1000) * 11);
-  };
-  var mm = $('minimap-canvas');
-  if (mm && core.attachMinimap && typeof mm.transferControlToOffscreen === 'function') {
-    core.attachMinimap(mm.transferControlToOffscreen());
-  }
   window.addEventListener('keydown', function (event) {
     var keys = { ' ': ' ', b: 'b', '.': '.', e: 'e', r: 'r', f: 'f', ',': ',' };
     if (keys[event.key]) { core.sendCommand(keys[event.key]); event.preventDefault(); }
-    if (event.key === 'z') core.zoomAt(1.25);
-    if (event.key === 'x') core.zoomAt(0.8);
-    if (event.key === '0') core.resetView();
     if (event.key === 'o') C.setSpoilers(!C.getSpoilers());
   });
 

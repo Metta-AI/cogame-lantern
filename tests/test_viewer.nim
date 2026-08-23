@@ -17,8 +17,7 @@ let chrome = readRepoFile("client/chrome_common.js")
 const InheritedIds = [
   "viewport", "stage", "board", "lightpool", "grain", "chrome", "scorebug",
   "plates-l", "plates-r", "clock", "clock-time", "clock-caption", "ffwd-mini",
-  "viewpanel", "minimap", "minimap-canvas", "zoombar", "zoom-out",
-  "zoom-slider", "zoom-in", "zoom-read", "mmwarn", "bannerlane", "killfeed",
+  "mmwarn", "bannerlane", "killfeed",
   "transport", "btn-restart", "btn-back", "btn-play", "btn-fwd", "btn-end",
   "btn-loop", "btn-skip", "btn-spoilers", "ffwd-chip", "win-chip",
   "tick-clock", "speedchips", "scrub", "momentum", "scrub-fill", "lulls",
@@ -49,7 +48,6 @@ suite "the chrome":
   test "the 360 px rules the playbook gotcha table requires are present":
     check ".plate-name { flex: 1 1 auto; min-width: 3.2em;" in page
     check "@media (max-width: 640px)" in page
-    check "#viewpanel { display: none !important; }" in page
     check "font-size: clamp(11px, 3.4vw, 17px)" in page
 
   test "DOM text is set with textContent, never innerHTML, for player data":
