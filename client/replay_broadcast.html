@@ -816,6 +816,24 @@ html, body {
 }
 .beat-marker.return { background: var(--tc, var(--paper-dim)); opacity: 0.45; }
 .beat-marker.capture { background: var(--tc, var(--amber)); width: calc(3 * var(--u)); height: calc(12 * var(--u)); }
+/* lantern beats (chrome_common.markBeat emits `.beat.beat-<kind>`): a find is
+   a tick in the seeker's colour, a lock is a taller one. Buttons that seek on
+   click, with a fingertip hit box and a round head so they read at 360 px. */
+.beat {
+  position: absolute; top: 0; z-index: 4;
+  width: max(calc(2 * var(--u)), 2px); height: calc(8 * var(--u));
+  margin: 0; padding: 0; border: 0; transform: translateX(-50%);
+  background: var(--paper-dim); cursor: pointer;
+}
+.beat::before { content: ''; position: absolute; inset: calc(-3 * var(--u)) calc(-5 * var(--u)); }
+.beat::after {
+  content: ''; position: absolute; left: 50%; top: 0;
+  width: calc(6 * var(--u)); height: calc(6 * var(--u));
+  transform: translate(-50%, calc(-3 * var(--u)));
+  border-radius: 50%; background: inherit;
+}
+.beat:hover, .beat:focus-visible { filter: brightness(1.4); outline: none; z-index: 5; }
+.beat-lock { height: calc(12 * var(--u)); width: max(calc(3 * var(--u)), 3px); }
 /* winner cap: a flat block just past the track's right end, colored by the
    verdict (split for a draw), so the scrubber itself says how this ends. */
 .scrub-win {
@@ -1563,6 +1581,8 @@ body[data-embed] #board { top: 0; height: 100%; }
   var eventCursor = 0;
 
   var C = window.ChromeCommon({
+    // Beat markers seek on click (chrome_common.markBeat builds buttons).
+    seek: function (tick) { core.sendCommand('s:' + tick); },
     send: function (cmd) { core.sendCommand(cmd); },
     getState: function () { return lastState; },
     getMeta: function () { return meta; }
@@ -1641,11 +1661,14 @@ body[data-embed] #board { top: 0; height: 100%; }
         })[0];
         if (hider) fireBurst(hider.x, hider.y);
         C.markBeat(event.t, 'found', event.seeker.indexOf('Moth') === 0 ? 'Moth' : 'Owl',
-                   meta.tick_count);
+                   meta.tick_count,
+                   event.hider + ' found by ' + event.seeker + ' after ' +
+                   event.hidden_s.toFixed(1) + ' s');
       }
       if (event.type === 'crate_lock') {
         C.markBeat(event.t, 'lock',
-                   event.alias.indexOf('Moth') === 0 ? 'Moth' : 'Owl', meta.tick_count);
+                   event.alias.indexOf('Moth') === 0 ? 'Moth' : 'Owl', meta.tick_count,
+                   event.alias + ' locks a crate');
       }
     }
   }
@@ -1715,7 +1738,7 @@ body[data-embed] #board { top: 0; height: 100%; }
         r.hidden_seconds[slot].toFixed(1) + 's hidden, ' + r.finds[slot] + ' finds';
       host.appendChild(row);
     }
-    $('endcard').classList.add('show');
+    $('endcard').classList.add('on');
   }
 
   function onState(text) {
@@ -1731,7 +1754,11 @@ body[data-embed] #board { top: 0; height: 100%; }
     C.applySpoilers();
     drainEvents(state.tick);
     momentumSeries.push([state.tick, state.hiders_left || 0]);
+    // The score screen goes up on the last tick and comes down on any seek
+    // back into the match; it stops above the transport band (#endcard
+    // bottom: var(--band)), so the scrubber is always reachable beneath it.
     if (state.tick >= (meta ? meta.tick_count - 1 : 0)) renderEndcard();
+    else $('endcard').classList.remove('on');
   }
 
   function onMeta(text) {

@@ -186,17 +186,31 @@ window.ChromeCommon = function (ctx) {
   // ---- beat markers on the scrubber (finds, locks, breaks) -----------------
   var seenMarkers = {};
   var markerEls = [];
-  function markBeat(tick, kind, team, total) {
+  function markBeat(tick, kind, team, total, label) {
     var key = tick + '|' + kind;
     if (seenMarkers[key]) return;
     seenMarkers[key] = true;
     var host = $('scrub');
     if (!host || !total) return;
-    var el = document.createElement('i');
+    // A button, not an <i>: every beat is a seek target. The page hands us
+    // its seek in ctx; without one the click falls through to the scrub
+    // track's own click-to-seek, which lands at the same x anyway.
+    var el = document.createElement('button');
+    el.type = 'button';
     el.className = 'beat beat-' + kind;
     el.style.left = (tick * 100 / total) + '%';
     el.style.background = teamCol(team);
     el.dataset.tick = String(tick);
+    if (label) {
+      el.title = label;
+      el.setAttribute('aria-label', label + ' (seek)');
+    }
+    if (ctx.seek) {
+      el.addEventListener('click', function (event) {
+        event.stopPropagation();
+        ctx.seek(tick);
+      });
+    }
     host.appendChild(el);
     markerEls.push(el);
     applySpoilers();
