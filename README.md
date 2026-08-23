@@ -79,6 +79,12 @@ digests. What you see:
   hunt starts;
 - a **side-swap intermission card** at half time so the reset is visibly real.
 
+> **Unreleased on `main`:** the worker's 30-second wasm-runtime watchdog
+> (a runtime that never initialises now reports an error instead of leaving the
+> page on "loading replay") landed after 0.1.5 was published, so it is on `main`
+> but not in any served bundle yet. It ships with the next release; delete this
+> note then.
+
 ## Running it locally
 
 ```bash
