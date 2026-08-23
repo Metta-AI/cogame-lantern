@@ -449,6 +449,16 @@ proc clientAssetHandler(request: Request) {.gcsafe.} =
     else:
       serveFile(request, dataDir() / name, contentTypeFor(name))
 
+proc clientArtHandler(request: Request) {.gcsafe.} =
+  ## client/art/* for the live spectator page: broadcast_core.js fetches its
+  ## bitmaps from ./art relative to /client/global.
+  {.gcsafe.}:
+    let name = request.pathParams["name"]
+    if "/" in name or "\\" in name or name.startsWith("."):
+      request.respond(404)
+      return
+    serveFile(request, clientDir() / "art" / name, contentTypeFor(name))
+
 proc replayDataHandler(request: Request) {.gcsafe.} =
   {.gcsafe.}:
     if replayPayloadGlobal.len == 0:
@@ -567,6 +577,7 @@ proc buildRouter(replayMode: bool): Router =
   result.get("/client/replay", replayPageHandler)
   result.get("/client/global", pageHandler("global.html"))
   result.get("/client/player", pageHandler("player.html"))
+  result.get("/client/art/@name", clientArtHandler)
   result.get("/client/@name", clientAssetHandler)
   result.get("/replay-data", replayDataHandler)
   result.get("/global", globalUpgradeHandler)

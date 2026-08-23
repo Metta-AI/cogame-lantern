@@ -101,6 +101,18 @@ suite "the server":
     for cog in snapshot["cogs"]:
       aliases.add(cog["alias"].getStr())
     check aliases == @["Moth-1", "Owl-1", "Moth-2", "Owl-2", "Moth-3", "Owl-3"]
+    ## The live page draws with broadcast_core.js off the SAME frame packet
+    ## the wasm replay serves, plus the blueprint and the seekers' lit set.
+    check snapshot["frame"]["type"].getStr() == "frame"
+    check snapshot["frame"]["cogs"].len == Seats
+    check snapshot["frame"]["cogs"][0].hasKey("x")
+    check snapshot["meta"]["type"].getStr() == "meta"
+    check snapshot["meta"]["map"]["obstacles"].len > 0
+    check snapshot["meta"]["config"]["lanternRangePx"].getInt() > 0
+    check snapshot["meta"]["lit_grid"].len == 3
+    let cells = snapshot["meta"]["lit_grid"][0].getInt() *
+      snapshot["meta"]["lit_grid"][1].getInt()
+    check snapshot["lit_b64"].getStr().len >= ((cells + 7) div 8) * 4 div 3
 
   test "the platform's GAME CONTRACT routes all answer 200":
     ## The episode runner does exactly these, before it starts a single
@@ -116,6 +128,9 @@ suite "the server":
     let spectator = httpGet("/client/global")
     check spectator.code == Http200
     check "/global" in spectator.body
+    check "/client/broadcast_core.js" in spectator.body
+    check httpGet("/client/broadcast_core.js").code == Http200
+    check httpGet("/client/art/cog_owl_rig.png").code == Http200
     check httpGet("/player?slot=0&token=bad").code == Http403
 
   test "/client/replay is served SPLICED, never raw":

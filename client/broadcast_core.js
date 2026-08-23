@@ -42,6 +42,7 @@
     var ART_BASE = (config.artBase || './art');
     function loadArt() {
       if (typeof fetch !== 'function' || typeof createImageBitmap !== 'function') return;
+      // fetch() the bitmaps so the same loader works in a Worker and on a page.
       ['floor.jpg', 'crate.png', 'crate_locked.png', 'crate_broken.png',
        'cog_moth_rig.png', 'cog_owl_rig.png'].forEach(function (name) {
         fetch(ART_BASE + '/' + name)
@@ -79,9 +80,9 @@
       var w = bitmap.width, h = bitmap.height;
       var rig = { bitmap: bitmap, px: w / 2, py: h / 2, scale: RigBodyPx / h,
                   reach: RigBodyPx / 2 };
-      if (typeof OffscreenCanvas !== 'function') return rig;
+      var scratch = scratchCanvas(w, h);
+      if (!scratch) return rig;
       try {
-        var scratch = new OffscreenCanvas(w, h);
         var sc = scratch.getContext('2d');
         sc.drawImage(bitmap, 0, 0);
         var data = sc.getImageData(0, 0, w, h).data;
@@ -122,10 +123,11 @@
     var litMask = null;       // { cols, rows, cell, canvas }
     var lightLayer = null;    // board-sized scratch the cones are built in
     function setLitMask(bytes, cols, rows, cell) {
-      if (typeof OffscreenCanvas !== 'function' || !cols || !rows) return;
+      if (!cols || !rows) return;
       if (!litMask || litMask.cols !== cols || litMask.rows !== rows) {
-        litMask = { cols: cols, rows: rows, cell: cell,
-                    canvas: new OffscreenCanvas(cols, rows) };
+        var surface = scratchCanvas(cols, rows);
+        if (!surface) return;
+        litMask = { cols: cols, rows: rows, cell: cell, canvas: surface };
         litMask.image = litMask.canvas.getContext('2d').createImageData(cols, rows);
       }
       var pixels = litMask.image.data;
@@ -336,14 +338,14 @@
       // crates and the pen door throwing the same shadows the detection rule
       // sees. Without the mask (no OffscreenCanvas, or a build act) the raw
       // cones are drawn straight onto the board.
-      if (!litMask || typeof OffscreenCanvas !== 'function') {
+      if (!lightLayer && litMask) lightLayer = scratchCanvas(MAP_W, MAP_H);
+      if (!litMask || !lightLayer) {
         context.save();
         context.globalCompositeOperation = 'lighter';
         paintCones(context);
         context.restore();
         return;
       }
-      if (!lightLayer) lightLayer = new OffscreenCanvas(MAP_W, MAP_H);
       var lc = lightLayer.getContext('2d');
       lc.setTransform(1, 0, 0, 1, 0, 0);
       lc.globalCompositeOperation = 'source-over';

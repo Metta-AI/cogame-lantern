@@ -12,7 +12,7 @@
 ## same match" a claim the viewer can actually prove.
 
 import std/json
-import lantern/[types, arena, config, sim, rules, replay, labels]
+import lantern/[types, arena, config, sim, rules, replay, labels, broadcast]
 
 var
   meta: string
@@ -39,62 +39,11 @@ proc bytesFromPointer(data: ptr uint8, length: int): string =
   if length > 0:
     copyMem(result[0].addr, data, length)
 
-proc refreshLitMask() =
-  if litMask.len != FovW * FovH:
-    litMask = newSeq[uint8](FovW * FovH)
-  let lit = world.lanternsOn()
-  for cy in 0 ..< FovH:
-    let y = min(cy * FovCell + FovCell div 2, MapHeight - 1)
-    for cx in 0 ..< FovW:
-      let x = min(cx * FovCell + FovCell div 2, MapWidth - 1)
-      litMask[cy * FovW + cx] =
-        if lit and world.teamLit(x, y): 1'u8 else: 0'u8
-
 proc packetJson(): string =
-  let phase = phaseAt(worldConfig, min(world.tick, tickCount - 1))
-  refreshLitMask()
-  var cogs = newJArray()
-  var hb = newJArray()
-  var hidden = [0, 0]
-  var left = 0
-  for slot in 0 ..< world.seats:
-    let cog = world.cogs[slot]
-    let role = roleOfSlot(slot, phase.half)
-    let frozen = phase.act == actBuild and role == roSeeker
-    if teamOfSlot(slot) == tmMoth: hidden[0] += cog.hiddenTicks
-    else: hidden[1] += cog.hiddenTicks
-    if role == roHider and not cog.found:
-      inc left
-    cogs.add(%*{
-      "alias": aliasOfSlot(slot), "team": $teamOfSlot(slot), "role": $role,
-      "x": cog.px, "y": cog.py, "aim": cog.aim,
-      "state": (if cog.found: 3 elif frozen: 1 elif cog.crawling: 2 else: 0),
-      "lit": (role == roHider and not cog.found and
-              world.teamLit(cog.px, cog.py))})
-    if role == roSeeker:
-      hb.add(%bandCode(cog.band))
-  var crates = newJArray()
-  for crate in world.crates:
-    crates.add(%[crate.c.x, crate.c.y, ord(crate.state)])
-  var sounds = newJArray()
-  for ring in world.sounds:
-    sounds.add(%*{"kind": $ring.kind, "pos": [ring.at.x, ring.at.y],
-                  "radius": ring.radius, "age_ticks": world.tick - ring.tick})
-  var flashes = newJArray()
-  for burst in bursts:
-    flashes.add(%[burst[0], burst[1]])
+  litMask = litMaskBytes(world)
+  let packet = framePacket(world, bursts)
   bursts.setLen(0)
-  $ %*{
-    "type": "frame",
-    "tick": world.tick, "half": phase.half, "act": $phase.act,
-    "turn": phase.turn, "act_left_ticks": phase.actLeft,
-    "cogs": cogs, "crates": crates, "sounds": sounds, "hb": hb,
-    "hidden_s": [hidden[0].float / TargetFps.float,
-                 hidden[1].float / TargetFps.float],
-    "hiders_left": left,
-    "bursts": flashes,
-    "intermission": world.tick > 0 and isHalfBoundary(worldConfig, world.tick)
-  }
+  $packet
 
 proc rebuildWorld() =
   world = newSim(worldConfig, worldMap)

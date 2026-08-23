@@ -9,10 +9,16 @@
 
   It is a spectator surface, so nothing is hidden: it draws the whole floor,
   both trios and every crate off the /global snapshot, including the cogs the
-  seekers cannot see. The hosted broadcast is the STATIC WASM BUNDLE, never
-  this page — this is what you get while an episode is actually running, and
-  it is one of the two HTTP routes the platform's episode runner requires
+  seekers cannot see. It is what you get while an episode is actually
+  running (the hosted replay afterwards is the static wasm bundle), and it is
+  one of the two HTTP routes the platform's episode runner requires
   (/client/player is the other).
+
+  It draws with the SAME broadcast_core.js as the replay viewer, on the main
+  thread: the snapshot carries the frame packet the wasm module would have
+  produced (`frame`), the blueprint + lantern numbers (`meta`) and the
+  seekers' lit set bit-packed (`lit_b64`), so racks, paintbot cog rigs and
+  sim-exact light occlusion are identical live and in the replay.
 -->
 <style>
   :root { --paper:#f2e8d8; --moth:#f2c14e; --owl:#4ecdc4; --ink:#2a1f16; }
@@ -27,7 +33,7 @@
   #bar .act { letter-spacing: 2px; color: #e8a33d; }
   #bar .grow { flex: 1 1 auto; }
   #boardwrap { flex: 1 1 auto; position: relative; min-height: 0; }
-  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   #feed { height: 132px; overflow: hidden; padding: 6px 12px; font-size: 12px;
     line-height: 1.5; background: rgba(20,14,9,0.7);
     border-top: 1px solid rgba(242,232,216,0.16); }
@@ -49,108 +55,34 @@
   <div id="feed"></div>
   <div id="status">connecting&hellip;</div>
 </div>
+<script src="/client/broadcast_core.js"></script>
 <script>
 (function () {
   'use strict';
-  var MAP_W = 1235, MAP_H = 659;
   var canvas = document.getElementById('board');
-  var context = canvas.getContext('2d');
-  var state = null;
   var feed = [];
   var lastSay = {};
+  var metaSent = false;
+  var core = window.BroadcastCore.create({
+    canvas: canvas,
+    viewportWidth: 960, viewportHeight: 540,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    artBase: '/client/art'
+  });
 
   function fit() {
     var rect = canvas.parentNode.getBoundingClientRect();
-    var dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.max(1, Math.round(rect.width * dpr));
-    canvas.height = Math.max(1, Math.round(rect.height * dpr));
-    draw();
+    core.setViewportSize(Math.max(1, rect.width), Math.max(1, rect.height),
+                         window.devicePixelRatio || 1);
   }
 
-  function teamColour(team) { return team === 'Moth' ? '#f2c14e' : '#4ecdc4'; }
-
-  function draw() {
-    if (!canvas.width) return;
-    var scale = Math.min(canvas.width / MAP_W, canvas.height / MAP_H);
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = '#0c0906';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(scale, 0, 0, scale,
-      (canvas.width - MAP_W * scale) / 2, (canvas.height - MAP_H * scale) / 2);
-    context.fillStyle = '#171310';
-    context.fillRect(0, 0, MAP_W, MAP_H);
-    if (!state) return;
-    (state.map.walls || []).forEach(function (w) {
-      context.fillStyle = '#2c231b';
-      context.fillRect(w[0], w[1], w[2], w[3]);
-    });
-    var pen = state.map.pen;
-    if (pen) {
-      context.strokeStyle = 'rgba(78,205,196,0.35)';
-      context.lineWidth = 2;
-      context.strokeRect(pen[0], pen[1], pen[2], pen[3]);
+  function unpackLit(b64, cells) {
+    var raw = atob(b64);
+    var out = new Uint8Array(cells);
+    for (var i = 0; i < cells; i++) {
+      out[i] = (raw.charCodeAt(i >> 3) >> (i & 7)) & 1;
     }
-    (state.crates || []).forEach(function (crate) {
-      if (crate.state === 'broken') {
-        context.strokeStyle = 'rgba(150,118,82,0.5)';
-        context.lineWidth = 3;
-        context.beginPath();
-        context.moveTo(crate.pos[0] - 20, crate.pos[1] - 8);
-        context.lineTo(crate.pos[0] + 20, crate.pos[1] + 6);
-        context.stroke();
-        return;
-      }
-      context.fillStyle = crate.state === 'locked' ? '#8a6a3c' : '#7b5c35';
-      context.fillRect(crate.pos[0] - 24, crate.pos[1] - 24, 48, 48);
-      context.strokeStyle = '#18110b';
-      context.lineWidth = 2;
-      context.strokeRect(crate.pos[0] - 23, crate.pos[1] - 23, 46, 46);
-      if (crate.state === 'locked') {
-        context.fillStyle = '#d8c08a';
-        [[-14, -14], [14, -14], [-14, 14], [14, 14]].forEach(function (p) {
-          context.beginPath();
-          context.arc(crate.pos[0] + p[0], crate.pos[1] + p[1], 3, 0, Math.PI * 2);
-          context.fill();
-        });
-      }
-    });
-    (state.sounds || []).forEach(function (ring) {
-      var age = ring.age_ticks / 24;
-      context.strokeStyle = 'rgba(232,163,61,' + Math.max(0, 0.45 * (1 - age)) + ')';
-      context.lineWidth = ring.kind === 'break' ? 4 : 2;
-      context.setLineDash(ring.kind === 'step' ? [8, 8] : []);
-      context.beginPath();
-      context.arc(ring.pos[0], ring.pos[1], ring.radius * (0.3 + age * 0.7), 0, Math.PI * 2);
-      context.stroke();
-      context.setLineDash([]);
-    });
-    (state.cogs || []).forEach(function (cog) {
-      var colour = teamColour(cog.team);
-      if (cog.role === 'seeker' && state.act === 'hunt') {
-        var heading = -cog.aim * Math.PI * 2 / 256;
-        var half = 18 * Math.PI * 2 / 256;
-        var glow = context.createRadialGradient(
-          cog.pos[0], cog.pos[1], 8, cog.pos[0], cog.pos[1], 420);
-        glow.addColorStop(0, 'rgba(255,246,214,0.34)');
-        glow.addColorStop(1, 'rgba(255,246,214,0)');
-        context.fillStyle = glow;
-        context.beginPath();
-        context.moveTo(cog.pos[0], cog.pos[1]);
-        context.arc(cog.pos[0], cog.pos[1], 420, heading - half, heading + half);
-        context.closePath();
-        context.fill();
-      }
-      context.globalAlpha = cog.found ? 0.3 : 1;
-      context.fillStyle = colour;
-      context.beginPath();
-      context.arc(cog.pos[0], cog.pos[1], 9, 0, Math.PI * 2);
-      context.fill();
-      context.globalAlpha = 1;
-      context.fillStyle = 'rgba(242,232,216,0.85)';
-      context.font = '11px sans-serif';
-      context.textAlign = 'center';
-      context.fillText(cog.alias, cog.pos[0], cog.pos[1] - 14);
-    });
+    return out;
   }
 
   function pushFeed(line) {
@@ -165,8 +97,7 @@
     });
   }
 
-  function render(snapshot) {
-    state = snapshot;
+  function render(state) {
     var hiddenMoth = 0, hiddenOwl = 0;
     (state.cogs || []).forEach(function (cog) {
       if (cog.team === 'Moth') hiddenMoth += cog.hidden_ticks;
@@ -188,7 +119,16 @@
       'Owl ' + (hiddenOwl / 24).toFixed(1) + 's';
     document.getElementById('turn').textContent =
       'turn ' + (state.turn + 1) + '/' + state.turns;
-    draw();
+    if (state.meta && !metaSent) {
+      metaSent = true;
+      core.ingest(JSON.stringify(state.meta));
+    }
+    if (state.frame) core.ingest(JSON.stringify(state.frame));
+    var grid = state.meta && state.meta.lit_grid;
+    if (state.lit_b64 && grid) {
+      core.setLitMask(unpackLit(state.lit_b64, grid[0] * grid[1]),
+                      grid[0], grid[1], grid[2]);
+    }
   }
 
   function connect() {
@@ -212,6 +152,7 @@
 
   window.addEventListener('resize', fit);
   fit();
+  core.start();
   connect();
 })();
 </script>
