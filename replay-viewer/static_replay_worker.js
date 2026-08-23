@@ -13,6 +13,12 @@
 self.window = self;
 
 var FETCH_TIMEOUT_MS = 20000;
+// The wasm runtime is the one step with no failure path of its own: a glue
+// that never instantiates, a .wasm that 404s, a compile that is killed --
+// none of them raise, they just never call onRuntimeInitialized, and the
+// page sits on "loading replay" until the tab dies. Bound it, and report the
+// same error envelope every other failure uses so the shell shows an error.
+var RUNTIME_TIMEOUT_MS = 30000;
 var SPEEDS = [1, 2, 3, 4, 8, 16];
 
 var Module = {};
@@ -59,6 +65,9 @@ function runtimeError() {
 function reportFailure(error) {
   if (failed || disposed) return;
   failed = true;
+  // The runtime watchdog has nothing left to say once a failure is out; the
+  // shell keeps the FIRST failure anyway (showFailure is first-wins).
+  clearTimeout(runtimeTimer);
   postMessage({
     type: 'error',
     message: error && error.message ? error.message : String(error),
@@ -230,8 +239,15 @@ Module.onAbort = function (what) {
   reportFailure(new Error('Replay runtime ran out of memory (' + what +
     ') - wasm32 is limited to 2 GB' + (stage ? '. Failed while: ' + stage : '')));
 };
+var runtimeTimer = setTimeout(function () {
+  if (runtimeReady) return;
+  reportFailure(new Error('wasm runtime did not initialize in ' +
+    Math.round(RUNTIME_TIMEOUT_MS / 1000) + 's'));
+}, RUNTIME_TIMEOUT_MS);
+
 Module.onRuntimeInitialized = function () {
   runtimeReady = true;
+  clearTimeout(runtimeTimer);
   start();
 };
 self.Module = Module;

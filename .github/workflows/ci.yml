@@ -233,6 +233,32 @@ jobs:
           echo "bundle OK:"
           find "${out}" -type f -printf '  %p (%s bytes)\n'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # tools/build_replay_viewer.sh already runs this harness, but only
+      # `if command -v node` -- a runner without node would skip it silently.
+      # Run it here too, unconditionally, and against the PACKAGED bundle
+      # rather than replay-viewer/dist, because the packaged bundle is what
+      # the platform serves.
+      #
+      # This is the check that catches the class of bug that shipped 0.1.4:
+      # static_replay_worker.js imported the MODULARIZE=1 glue and never
+      # called the factory, so the runtime never came up, no error was ever
+      # raised, and every hosted replay hung on "loading replay" forever.
+      # The harness boots the worker in a `vm` context that emulates a
+      # dedicated Worker (self / importScripts / postMessage) and asserts the
+      # runtime really initialises -- and, separately, that a runtime which
+      # never initialises produces an error instead of a hang.
+      - name: Boot the worker the way a browser does (wasm runtime comes up)
+        run: |
+          set -euo pipefail
+          command -v node >/dev/null || {
+            echo "::error::node is required for the worker bootstrap check"; exit 1; }
+          node --version
+          node tools/wasm_replay_smoke.cjs "$PWD/dist/static-replay-viewer"
+
       - name: Upload the bundle
         uses: actions/upload-artifact@v4
         with:

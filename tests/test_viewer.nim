@@ -87,6 +87,18 @@ suite "the static replay shell":
     check "self.LanternReplayModule(Module)" in worker
     check worker.find("bootRuntime();") > worker.find("importScripts(")
 
+  test "the wasm runtime is on a watchdog, not left to hang":
+    ## Instantiating the runtime is the one step with no failure path of its
+    ## own: nothing raises when onRuntimeInitialized simply never fires, so
+    ## without a bound the page shows its spinner until the tab dies. The
+    ## worker posts the ordinary error envelope; static_replay.js turns that
+    ## into data-replay-error and a coworld-replay `error` to the embedder.
+    check "RUNTIME_TIMEOUT_MS = 30000" in worker
+    check "did not initialize" in worker
+    check "clearTimeout(runtimeTimer)" in worker
+    check "data-replay-error" in shell
+    check "data-replay-loaded" in shell
+
   test "the fetch is bounded and offers a retry":
     check "AbortController" in worker
     check "FETCH_TIMEOUT_MS" in worker

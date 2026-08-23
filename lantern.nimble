@@ -1,4 +1,4 @@
-version     = "0.1.0"
+version     = "0.1.5"
 author      = "daveey"
 description = "Lantern: 3v3 hide-and-seek in the dark on a warehouse floor, for the Softmax Coworld platform. Hiders bolt crates into a fort, seekers sweep the dark with flashlights, then the sides swap."
 license     = "MIT"
