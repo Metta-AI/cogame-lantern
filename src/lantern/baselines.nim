@@ -23,6 +23,21 @@ proc parseScriptKind*(text: string): ScriptKind =
   of "moth": skMoth
   else: skNone
 
+type
+  WardenParams* = object
+    ## The three numbers the `warden` baseline is tuned on. They are
+    ## parameters rather than literals because `tools/tune_baselines.nim`
+    ## sweeps them over a grid of seeds; the shipped values below are that
+    ## sweep's argmax, recorded in `tests/fixtures/tuning_grid.json` and
+    ## re-derived by `tests/test_tuning.nim`.
+    coverageGatePct*: int  ## screen this much of the nook mouth, then bolt
+    buildLocks*: int       ## locks the hider spends during the build act
+    pryHotTurns*: int      ## hot/burning turns with nothing lit before a pry
+
+const
+  ShippedWardenParams* = WardenParams(coverageGatePct: 60, buildLocks: 3,
+                                      pryHotTurns: 3)
+
 proc openingSpan(nook: Nook): (bool, int, int, int) =
   ## (vertical?, lo, hi, fixed) for the nook's opening segment.
   if nook.openA.x == nook.openB.x:
@@ -51,21 +66,22 @@ proc coveragePct*(nook: Nook, crate: Crate): int =
   let overlap = min(hi, box.x + box.w) - max(lo, box.x)
   clampInt(overlap * 100 div span, 0, 100)
 
-proc wardenHide(sim: Sim, slot, half: int): Order =
+proc wardenHide(sim: Sim, slot, half: int, params: WardenParams): Order =
   let config = sim.config
   let cog = sim.cogs[slot]
   let here = Point(x: cog.px, y: cog.py)
   let nook = sim.map.nooks[indexInTeam(slot) mod sim.map.nooks.len]
   let phase = phaseAt(sim.config, sim.tick)
   if phase.act == actBuild:
-    if cog.locksUsed < 2:
+    if cog.locksUsed < params.buildLocks:
       let mid = openingMid(nook)
       ## Nearest loose crate TO THE DOORWAY, not to the cog: a crate on the
       ## far side of the alcove's own back wall cannot be shoved into the
       ## mouth without a pathfinder, and there is no pathfinder.
       let target = nearestCrate(sim.crates, mid.x, mid.y, {csLoose})
       if target >= 0:
-        let seated = coveragePct(nook, sim.crates[target]) >= 60 or
+        let seated = coveragePct(nook, sim.crates[target]) >=
+          params.coverageGatePct or
           distPx(sim.crates[target].c.x, sim.crates[target].c.y,
                  mid.x, mid.y) <= 36
         ## Two turns of shoving is the whole budget for one crate. A crate
@@ -112,7 +128,7 @@ proc wardenHide(sim: Sim, slot, half: int): Order =
   Order(intent: inHide, target: cycled.anchor, crate: -1, aim: amTarget,
         crawl: true, note: "still and dark behind the crate", say: "holding")
 
-proc wardenSeek(sim: Sim, slot, half: int): Order =
+proc wardenSeek(sim: Sim, slot, half: int, params: WardenParams): Order =
   var cog = sim.cogs[slot]
   let here = Point(x: cog.px, y: cog.py)
   ## Anything lit is worth everything else put together.
@@ -141,7 +157,7 @@ proc wardenSeek(sim: Sim, slot, half: int): Order =
     sim.cogs[slot].memo[2] = cog.memo[2] + 1
   else:
     sim.cogs[slot].memo[2] = 0
-  if sim.cogs[slot].memo[2] >= 2:
+  if sim.cogs[slot].memo[2] >= params.pryHotTurns:
     let target = nearestCrate(sim.crates, here.x, here.y, {csLocked})
     if target >= 0:
       return Order(intent: inPry, target: sim.crates[target].c, crate: target,
@@ -193,14 +209,16 @@ proc mothSeek(sim: Sim, slot, half: int): Order =
   Order(intent: inSweep, target: target, crate: -1, aim: amSweep, crawl: false,
         note: "sweeping toward a fresh corner", say: "looking")
 
-proc scriptedOrder*(sim: Sim, slot, half: int, kind: ScriptKind): Order =
+proc scriptedOrder*(sim: Sim, slot, half: int, kind: ScriptKind,
+                    params = ShippedWardenParams): Order =
   ## The always-legal order for `slot` this turn. `skNone` plays the warden:
-  ## a seat with no policy at all still plays the game.
+  ## a seat with no policy at all still plays the game. `params` is only ever
+  ## non-default in the tuning harness.
   let role = roleOfSlot(slot, half)
   let effective = if kind == skNone: skWarden else: kind
   case effective
   of skMoth:
     if role == roHider: mothHide(sim, slot) else: mothSeek(sim, slot, half)
   else:
-    if role == roHider: wardenHide(sim, slot, half)
-    else: wardenSeek(sim, slot, half)
+    if role == roHider: wardenHide(sim, slot, half, params)
+    else: wardenSeek(sim, slot, half, params)

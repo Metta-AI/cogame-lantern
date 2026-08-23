@@ -1,0 +1,570 @@
+{
+  "harness": "tools/tune_baselines.nim",
+  "metric": "warden(candidate) score in milli on the Moth seats, averaged over both opponents and every seed",
+  "opponents": [
+    "moth",
+    "warden(reference)"
+  ],
+  "reference": {
+    "coverage_gate_pct": 60,
+    "build_locks": 2,
+    "pry_hot_turns": 2
+  },
+  "seeds": [
+    1,
+    7,
+    42,
+    99
+  ],
+  "prep_ticks": 720,
+  "hunt_ticks": 1800,
+  "game_version": "1",
+  "chosen": {
+    "coverage_gate_pct": 60,
+    "build_locks": 3,
+    "pry_hot_turns": 3
+  },
+  "chosen_mean_milli": 656,
+  "grid": [
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 1,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        494,
+        494,
+        494,
+        494
+      ],
+      "mean_milli": 602
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 1,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        409,
+        409,
+        409,
+        409
+      ],
+      "mean_milli": 559
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 1,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        504,
+        504,
+        504,
+        504
+      ],
+      "mean_milli": 607
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 2,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        494,
+        494,
+        494,
+        494
+      ],
+      "mean_milli": 601
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 2,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        410,
+        410,
+        410,
+        410
+      ],
+      "mean_milli": 559
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 2,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        504,
+        504,
+        504,
+        504
+      ],
+      "mean_milli": 606
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 3,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        530,
+        530,
+        605,
+        530
+      ],
+      "mean_milli": 650
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 3,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        446,
+        446,
+        521,
+        446
+      ],
+      "mean_milli": 608
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 40,
+        "build_locks": 3,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        541,
+        541,
+        615,
+        541
+      ],
+      "mean_milli": 656
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 1,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        494,
+        494,
+        494,
+        494
+      ],
+      "mean_milli": 602
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 1,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        409,
+        409,
+        409,
+        409
+      ],
+      "mean_milli": 559
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 1,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        504,
+        504,
+        504,
+        504
+      ],
+      "mean_milli": 607
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 2,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        494,
+        494,
+        494,
+        494
+      ],
+      "mean_milli": 601
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 2,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        410,
+        410,
+        410,
+        410
+      ],
+      "mean_milli": 559
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 2,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        504,
+        504,
+        504,
+        504
+      ],
+      "mean_milli": 606
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 3,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        530,
+        530,
+        605,
+        530
+      ],
+      "mean_milli": 650
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 3,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        446,
+        446,
+        521,
+        446
+      ],
+      "mean_milli": 608
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 60,
+        "build_locks": 3,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        541,
+        541,
+        615,
+        541
+      ],
+      "mean_milli": 656
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 1,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        494,
+        494,
+        494,
+        494
+      ],
+      "mean_milli": 602
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 1,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        409,
+        409,
+        409,
+        409
+      ],
+      "mean_milli": 559
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 1,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        652,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        504,
+        504,
+        504,
+        504
+      ],
+      "mean_milli": 607
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 2,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        494,
+        494,
+        494,
+        494
+      ],
+      "mean_milli": 601
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 2,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        410,
+        410,
+        410,
+        410
+      ],
+      "mean_milli": 559
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 2,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        648,
+        768,
+        700,
+        720
+      ],
+      "vs_reference_milli": [
+        504,
+        504,
+        504,
+        504
+      ],
+      "mean_milli": 606
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 3,
+        "pry_hot_turns": 1
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        530,
+        530,
+        605,
+        530
+      ],
+      "mean_milli": 650
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 3,
+        "pry_hot_turns": 2
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        446,
+        446,
+        521,
+        446
+      ],
+      "mean_milli": 608
+    },
+    {
+      "params": {
+        "coverage_gate_pct": 80,
+        "build_locks": 3,
+        "pry_hot_turns": 3
+      },
+      "vs_moth_milli": [
+        671,
+        733,
+        745,
+        863
+      ],
+      "vs_reference_milli": [
+        541,
+        541,
+        615,
+        541
+      ],
+      "mean_milli": 656
+    }
+  ]
+}
