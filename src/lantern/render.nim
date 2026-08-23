@@ -118,8 +118,15 @@ proc seekerView*(sim: Sim, slot: int): JsonNode =
       continue
     let hider = sim.cogs[other]
     if hider.found:
+      ## `at_s` is measured from the start of THIS half's hunt act, which is
+      ## the clock the seat itself is on; an absolute match time would read
+      ## as ~141 s for a find two minutes into half 2.
+      let huntStart = (phase.half - 1) * halfTicks(config) + config.prepTicks
       found.add(%*{"alias": aliasOfSlot(other),
-                   "at_s": hider.foundTick.float / TargetFps.float})
+                   "at_s": (hider.foundTick - huntStart).float /
+                     TargetFps.float,
+                   "by": aliasOfSlot(hider.foundBy),
+                   "mode": hider.foundMode})
       continue
     inc left
     var by = ""

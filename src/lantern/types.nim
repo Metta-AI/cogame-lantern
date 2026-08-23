@@ -221,6 +221,8 @@ type
     crawling*: bool
     found*: bool
     foundTick*: int
+    foundBy*: int           ## the seeker's slot; only meaningful once `found`
+    foundMode*: string      ## "beam" or "tag"; only meaningful once `found`
     hiddenTicks*: int
     locksUsed*: int
     lockTarget*, lockProgress*: int

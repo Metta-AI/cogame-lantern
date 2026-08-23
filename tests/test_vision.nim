@@ -82,6 +82,28 @@ suite "the lantern":
           check entry["lit_by"].getStr() == "Owl-1"
       check sawMoth1
 
+  test "a found hider is reported with who found it, how, and when":
+    ## The seeker view's `found[]` entries carry the finder and the mode, as
+    ## the `found` replay event does; `at_s` is on the seat's own clock, the
+    ## hunt act of this half, not the match.
+    let sim = testSim()
+    sim.jumpToHunt()
+    sim.parkEveryoneElse([0, 1])
+    sim.place(0, 150, 110)
+    sim.place(1, 160, 110)               ## inside TouchTagPx, with sight
+    sim.prepareTick()
+    sim.applyTick(newSeq[Control](sim.seats))
+    check sim.cogs[0].found
+    var seen = false
+    for entry in seekerView(sim, 1)["found"]:
+      if entry["alias"].getStr() == "Moth-1":
+        seen = true
+        check entry["by"].getStr() == "Owl-1"
+        check entry["mode"].getStr() == "tag"
+        check entry["at_s"].getFloat() >= 0.0
+        check entry["at_s"].getFloat() < 1.0
+    check seen
+
   test "lanterns are off for every build tick":
     let sim = testSim()
     sim.parkEveryoneElse([0, 1])

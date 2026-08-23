@@ -51,6 +51,8 @@ proc placeCogs(sim: Sim, half: int) =
     cog.y = spawn.y * MotionScale
     cog.aim = (if roleOfSlot(slot, half) == roHider: 192 else: 64)
     cog.foundTick = -1
+    cog.foundBy = -1
+    cog.foundMode = ""
     cog.lockTarget = -1
     cog.pryTarget = -1
     cog.lastStepSoundTick = -StepSoundEveryTicks
@@ -575,6 +577,8 @@ proc applyTick*(sim: Sim, controls: openArray[Control]) =
       if finder >= 0:
         cog.found = true
         cog.foundTick = sim.tick
+        cog.foundBy = finder
+        cog.foundMode = mode
         cog.litStreak = 0
         let index = indexInTeam(slot)
         cog.x = (sim.map.caughtPen.x + 24 * index) * MotionScale

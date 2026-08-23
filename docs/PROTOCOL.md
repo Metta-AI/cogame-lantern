@@ -85,10 +85,14 @@ notes or `say` text, the exact heartbeat distance, or the seed.
                      "streak_ticks": 4}]},
  "team": [{"alias": "Owl-2", "pos": [900,240], "aim": 200, "heartbeat": "hot"}, …],
  "sounds": [{"kind": "push", "pos": [560,180], "age_ticks": 14}],
- "found": [{"alias": "Moth-1", "at_s": 21.5}],
+ "found": [{"alias": "Moth-1", "at_s": 21.5, "by": "Owl-2", "mode": "beam"}],
  "found_count": 1, "hiders_left": 2,
  "your_last_order": { … }}
 ```
+
+In `found[]`, `by` is the seeker that made the find and `mode` is `beam` or
+`tag`, exactly as in the `found` replay event; `at_s` is seconds since this
+half's hunt act began, the clock the seat itself is on.
 
 Hidden from **everyone**, both roles: the opponent's prompts, notes and `say`
 strings (they exist only in the replay, for spectators), the real player names
