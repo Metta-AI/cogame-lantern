@@ -82,12 +82,26 @@
       if (config.onTransform) config.onTransform(transform());
     }
 
+    // The bitmap must match the viewport from the very first frame. The
+    // canvas arrives here transferred from the page with whatever size the
+    // element had (none declared -> 300x150), and the page stretches the
+    // bitmap over the stage: draw a 1700px scene into 300px and the replay
+    // opens ~6x "zoomed in", and stays so until a resize message happens to
+    // arrive (fullscreen did it). Paintbot's core re-synced the bitmap on
+    // every draw; this one sizes it at create and on every resize.
+    function syncBitmap() {
+      var width = Math.round(viewport.width * viewport.dpr);
+      var height = Math.round(viewport.height * viewport.dpr);
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+    }
+    syncBitmap();
+
     function setViewportSize(width, height, dpr) {
       viewport.width = Math.max(1, width || viewport.width);
       viewport.height = Math.max(1, height || viewport.height);
       viewport.dpr = dpr || viewport.dpr;
-      canvas.width = Math.round(viewport.width * viewport.dpr);
-      canvas.height = Math.round(viewport.height * viewport.dpr);
+      syncBitmap();
       emitTransform();
       if (state) draw();
     }
@@ -353,6 +367,7 @@
     }
 
     function draw() {
+      syncBitmap();
       var t = transform();
       context.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
       context.fillStyle = '#0c0906';

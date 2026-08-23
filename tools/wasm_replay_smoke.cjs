@@ -179,7 +179,48 @@ async function smokeRuntimeWatchdog() {
     'watchdog, so a dead wasm runtime hangs the page on "loading replay"');
 }
 
+// The board canvas is transferred to the Worker with whatever bitmap size the
+// element had - <canvas id="board"> carries none, so 300x150 - and the core
+// draws a full-viewport scene into it. Unless the core sizes the bitmap to the
+// viewport it was CREATED with, the page stretches that 300x150 picture over
+// the stage until the first `resize` message (fullscreen, a window resize)
+// fixes it: the replay opens "zoomed in" and no zoom control can undo it,
+// because none of them touch the bitmap. This is exactly what a fresh load
+// looked like on softmax.com.
+function smokeCanvasBitmapSize() {
+  const vm = require('vm');
+  const corePath = fs.existsSync(path.join(distDir, 'broadcast_core.js'))
+    ? path.join(distDir, 'broadcast_core.js')
+    : path.join(__dirname, '..', 'client', 'broadcast_core.js');
+  const noop = () => {};
+  const context = new Proxy({}, {
+    get: (target, key) => (key in target ? target[key] : noop),
+    set: (target, key, value) => { target[key] = value; return true; }
+  });
+  const canvas = { width: 300, height: 150, getContext: () => context };
+  const sandbox = { console, Math, JSON };
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(corePath, 'utf8'), sandbox, { filename: corePath });
+  const core = sandbox.BroadcastCore.create({
+    canvas, viewportWidth: 1700, viewportHeight: 907, devicePixelRatio: 2
+  });
+  core.start();
+  if (canvas.width !== 3400 || canvas.height !== 1814) {
+    fail('the board bitmap was not sized to the viewport the core was created ' +
+      'with: got ' + canvas.width + 'x' + canvas.height + ', wanted 3400x1814 ' +
+      '(1700x907 css px at dpr 2). The replay opens stretched/"zoomed in" ' +
+      'until the first resize message.');
+  }
+  core.setViewportSize(800, 400, 1);
+  if (canvas.width !== 800 || canvas.height !== 400) {
+    fail('setViewportSize did not resize the bitmap: ' + canvas.width + 'x' + canvas.height);
+  }
+  console.log('  board bitmap OK: sized to the viewport at create and on resize');
+}
+
 (async function main() {
+  smokeCanvasBitmapSize();
   const modulePath = path.join(distDir, 'lantern_replay.js');
   if (!fs.existsSync(modulePath)) fail('no wasm module at ' + modulePath);
   if (!fs.existsSync(replayPath)) fail('no replay fixture at ' + replayPath);

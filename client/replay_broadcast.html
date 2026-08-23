@@ -834,15 +834,23 @@ html, body {
 /* Never a bare number: the readout carries its unit, and "FIT" names the state
    the board opens in instead of showing a meaningless 1.0x. */
 #zoom-read {
+  font: inherit;
   font-size: max(calc(9 * var(--u)), 9px);
   letter-spacing: 0.06em;
   color: var(--paper-dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
   flex: none;
   width: max(calc(26 * var(--u)), 26px);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 #zoom-read.zoomed { color: var(--amber); }
+#zoom-read:hover { color: var(--paper); }
+#zoom-read:focus-visible { outline: 1px solid var(--amber); outline-offset: calc(3 * var(--u)); }
 
 /* ---------- 5. TRANSPORT ---------- */
 #transport {
@@ -1630,7 +1638,7 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
         <input id="zoom-slider" type="range" min="0" max="1000" step="1" value="0"
                aria-label="Board zoom" aria-valuetext="Fitted">
         <button class="zbtn" id="zoom-in" title="Zoom in (z)" aria-label="Zoom in">+</button>
-        <span id="zoom-read" aria-live="off">FIT</span>
+        <button id="zoom-read" type="button" title="Fit the board (0)" aria-label="Fit the board">FIT</button>
       </div>
     </div>
 
@@ -1908,7 +1916,20 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
         onMeta: onMeta,
         onStatus: function (s) { $('status').textContent = s; },
         onFirstFrame: function () { $('status').classList.remove('show'); },
-        onTransform: function () { }
+        onTransform: function (t) {
+          var zoom = (t && t.zoom) || 1;
+          var fitted = zoom <= 1.001;
+          var slider = $('zoom-slider');
+          if (slider && document.activeElement !== slider) {
+            slider.value = String(Math.round(((zoom - 1) / 11) * 1000));
+          }
+          if (slider) slider.setAttribute('aria-valuetext', fitted ? 'Fitted' : zoom.toFixed(1) + 'x');
+          var read = $('zoom-read');
+          if (read) {
+            read.textContent = fitted ? 'FIT' : zoom.toFixed(1) + 'x';
+            read.classList.toggle('zoomed', !fitted);
+          }
+        }
       })
     : null;
   if (!core) {
@@ -1936,12 +1957,14 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
     var fraction = (event.clientX - rect.left) / Math.max(1, rect.width);
     core.sendCommand('s:' + Math.round(fraction * meta.tick_count));
   };
+  // The slider and the readout follow the core's ACTUAL zoom (see
+  // onTransform above), so the +/- buttons, the FIT button and the slider all
+  // agree; the slider itself only ever sends a level.
   $('zoom-in').onclick = function () { core.zoomAt(1.25); };
   $('zoom-out').onclick = function () { core.zoomAt(0.8); };
+  $('zoom-read').onclick = function () { core.resetView(); };
   $('zoom-slider').oninput = function () {
     core.setZoom(1 + (Number(this.value) / 1000) * 11);
-    $('zoom-read').textContent = Number(this.value) === 0 ? 'FIT' :
-      (1 + (Number(this.value) / 1000) * 11).toFixed(1) + 'x';
   };
   var mm = $('minimap-canvas');
   if (mm && core.attachMinimap && typeof mm.transferControlToOffscreen === 'function') {
@@ -1950,6 +1973,9 @@ body[data-noviewpanel] #viewpanel { display: none !important; }
   window.addEventListener('keydown', function (event) {
     var keys = { ' ': ' ', b: 'b', '.': '.', e: 'e', r: 'r', f: 'f', ',': ',' };
     if (keys[event.key]) { core.sendCommand(keys[event.key]); event.preventDefault(); }
+    if (event.key === 'z') core.zoomAt(1.25);
+    if (event.key === 'x') core.zoomAt(0.8);
+    if (event.key === '0') core.resetView();
     if (event.key === 'o') C.setSpoilers(!C.getSpoilers());
   });
 
