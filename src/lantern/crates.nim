@@ -62,6 +62,13 @@ proc cogBox*(x, y: int): Rect {.inline.} =
   Rect(x: x div MotionScale - PlayerHalf, y: y div MotionScale - PlayerHalf,
        w: 2 * PlayerHalf + 1, h: 2 * PlayerHalf + 1)
 
+proc cogCrateBox*(x, y: int): Rect {.inline.} =
+  ## The body a crate sees: wider than the wall body, so a cog stops at the
+  ## crate's face instead of a dozen pixels inside it.
+  Rect(x: x div MotionScale - CrateBodyHalf,
+       y: y div MotionScale - CrateBodyHalf,
+       w: 2 * CrateBodyHalf + 1, h: 2 * CrateBodyHalf + 1)
+
 proc touchesCrate*(crate: Crate, px, py, range: int): bool =
   ## True when a body centre is within `range` px of the crate's box.
   let box = crateRect(crate)

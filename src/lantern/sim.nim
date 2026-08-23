@@ -395,7 +395,7 @@ proc applyTick*(sim: Sim, controls: openArray[Control]) =
       var cog = sim.cogs[slot]
       if cog.found:
         continue
-      let body = cogBox(cog.x, cog.y)
+      let body = cogCrateBox(cog.x, cog.y)
       if not overlaps(body, crateRect(sim.crates[crateIndex])):
         continue
       let dx = moved[slot].x
@@ -416,7 +416,7 @@ proc applyTick*(sim: Sim, controls: openArray[Control]) =
         var others: seq[Rect]
         for other in 0 ..< sim.seats:
           if other != slot:
-            others.add(cogBox(sim.cogs[other].x, sim.cogs[other].y))
+            others.add(cogCrateBox(sim.cogs[other].x, sim.cogs[other].y))
         if crateBoxFree(sim.crates, sim.wallMask, target, crateIndex, others):
           let fromPos = sim.crates[crateIndex].c
           if axis == 0: sim.crates[crateIndex].c.x += distance

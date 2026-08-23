@@ -35,7 +35,7 @@ type
     pryHotTurns*: int      ## hot/burning turns with nothing lit before a pry
 
 const
-  ShippedWardenParams* = WardenParams(coverageGatePct: 60, buildLocks: 3,
+  ShippedWardenParams* = WardenParams(coverageGatePct: 60, buildLocks: 1,
                                       pryHotTurns: 3)
 
 proc openingSpan(nook: Nook): (bool, int, int, int) =

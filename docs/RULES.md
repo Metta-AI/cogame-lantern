@@ -15,7 +15,9 @@ ended up and where the bodies are*.
 
 ## Bodies
 
-- 12 × 12 px footprint, sub-pixel integer motion (`MotionScale = 256`).
+- 13 × 13 px footprint against walls and other cogs; 21 × 21 px against
+  crates, so a cog stops at a crate's face. Sub-pixel integer motion
+  (`MotionScale = 256`).
 - Hiders top out at 704 sub-pixels/tick (≈ 66 px/s); seekers at 768 (+9 %),
   because they have ground to cover.
 - **Crawling** caps a cog at 40 % of its top speed, makes no footstep sound,

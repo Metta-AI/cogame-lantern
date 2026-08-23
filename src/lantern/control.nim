@@ -28,16 +28,16 @@ proc crateEdgePoint(crate: Crate, fromX, fromY: int): Point =
   let top = absInt(fromY - box.y)
   let bottom = absInt(fromY - (box.y + box.h))
   var best = left
-  var point = Point(x: box.x - PlayerHalf - 1, y: crate.c.y)
+  var point = Point(x: box.x - CrateBodyHalf - 1, y: crate.c.y)
   if right < best:
     best = right
-    point = Point(x: box.x + box.w + PlayerHalf + 1, y: crate.c.y)
+    point = Point(x: box.x + box.w + CrateBodyHalf + 1, y: crate.c.y)
   if top < best:
     best = top
-    point = Point(x: crate.c.x, y: box.y - PlayerHalf - 1)
+    point = Point(x: crate.c.x, y: box.y - CrateBodyHalf - 1)
   if bottom < best:
     best = bottom
-    point = Point(x: crate.c.x, y: box.y + box.h + PlayerHalf + 1)
+    point = Point(x: crate.c.x, y: box.y + box.h + CrateBodyHalf + 1)
   Point(x: clampInt(point.x, 1, MapWidth - 2),
         y: clampInt(point.y, 1, MapHeight - 2))
 
@@ -144,8 +144,8 @@ proc steeringPoint(sim: Sim, slot, half: int, role: Role,
     let dir = signInt(if axisX: deltaX else: deltaY)
     if dir == 0:
       return order.target
-    let standOff = CrateHalf + PlayerHalf + 3
-    let clearance = CrateHalf + PlayerHalf + 12
+    let standOff = CrateHalf + CrateBodyHalf + 3
+    let clearance = CrateHalf + CrateBodyHalf + 12
     let behind =
       if axisX: Point(x: centre.x - dir * standOff, y: centre.y)
       else: Point(x: centre.x, y: centre.y - dir * standOff)

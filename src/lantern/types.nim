@@ -12,8 +12,11 @@
 import std/json
 
 const
-  GameVersion* = "1"
+  GameVersion* = "2"
     ## GV1 (lantern v1): 3v3 hide-and-seek, two acts per half, two halves.
+    ## GV2: a cog meets a crate with a 21 px body (CrateBodyHalf 10). The
+    ## 13 px wall body let cogs sink a dozen pixels into a crate before
+    ## it pushed back; the sprite is 36 px wide.
     ## Bump this whenever a rule changes what a recorded control byte does;
     ## the replay pins it so a viewer can refuse a replay it cannot re-derive.
   ReplayProtocol* = "lantern.replay.v1"
@@ -33,7 +36,8 @@ const
   SeekerMaxSpeed* = 768     ## seekers cover ground: +9 %
   CrawlPercent* = 40        ## a crawling cog is capped at 40 % of its max
   StopThreshold* = 8
-  PlayerHalf* = 6
+  PlayerHalf* = 6           ## the wall body: what slides along walls
+  CrateBodyHalf* = 10       ## the crate body: what a crate pushes back on
   PlayerBouncePct* = 40
   MovementSlideMaxScan* = 3
 

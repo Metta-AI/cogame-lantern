@@ -46,33 +46,34 @@ it, mean milli:
 
 | gate | locks | hot | mean | vs `moth` | vs reference |
 |---|---|---|---|---|---|
-| 60 | 3 | 3 | **656** | 671, 733, 745, 863 | 541, 541, 615, 541 |
-| 60 | 3 | 1 | 650 | 671, 733, 745, 863 | 530, 530, 605, 530 |
-| 60 | 3 | 2 | 608 | 671, 733, 745, 863 | 446, 446, 521, 446 |
-| 60 | 1 | 3 | 607 | 652, 768, 700, 720 | 504, 504, 504, 504 |
-| 60 | 2 | 3 | 606 | 648, 768, 700, 720 | 504, 504, 504, 504 |
-| 60 | 1 | 1 | 602 | 652, 768, 700, 720 | 494, 494, 494, 494 |
-| 60 | 2 | 1 | 601 | 648, 768, 700, 720 | 494, 494, 494, 494 |
-| 60 | 2 | 2 | 559 | 648, 768, 700, 720 | 410, 410, 410, 410 | ← the guess |
+| 60 | 1 | 3 | **575** | 631, 669, 688, 823 | 448, 448, 448, 448 |
+| 60 | 2 | 3 | 569 | 576, 657, 563, 657 | 495, 495, 556, 556 |
+| 60 | 3 | 3 | 569 | 576, 657, 563, 657 | 495, 495, 556, 556 |
+| 60 | 1 | 1 | 523 | 631, 669, 688, 823 | 344, 344, 344, 344 |
+| 60 | 2 | 1 | 517 | 576, 657, 563, 657 | 392, 392, 453, 453 |
+| 60 | 3 | 1 | 517 | 576, 657, 563, 657 | 392, 392, 453, 453 |
+| 60 | 1 | 2 | 464 | 631, 669, 688, 823 | 226, 226, 226, 226 |
+| 60 | 2 | 2 | 458 | 576, 657, 563, 657 | 273, 273, 334, 334 | ← the guess
 
 What the sweep says:
 
-* **`buildLocks = 3` is the one clear win.** Three bolted crates beat two on
-  both opponents and every seed (656 against 559 for the guess). A crate the
-  seekers can simply shove aside is not a screen.
+* **`buildLocks` is a wash since GV2.** Under GV1's 13 px crate body three
+  bolted crates was the one clear win (656 against 559 for the guess). With
+  the 21 px crate body a hider spends longer getting a crate into place, and
+  one lock now edges two and three by 6 milli (575 against 569) — inside the
+  noise of four seeds, so the harness's argmax carries it, not a story.
 * **`pryHotTurns` matters only against an opponent that bolts crates.** `moth`
   never locks anything, so every value scores the same against it; against the
-  reference warden, 3 edges 1 (541 vs 530 at `buildLocks = 3`) and 2 is the
-  worst of the three — the ordering is small and not monotone, so this
-  parameter is close to noise, and the argmax takes it at 3.
+  reference warden 3 beats 1 (448 vs 344 at `buildLocks = 1`), so the argmax
+  takes it at 3.
 * **`coverageGatePct` is inert.** 40, 60 and 80 score *identically* in every
   row: the "bolt on the last build turn" and "bolt if the crate is within 36 px
   of the mouth" clauses fire before the coverage test ever binds. The tie-break
   keeps the reference's 60.
 
-`baselines.ShippedWardenParams` is the argmax of that table — 60 / 3 / 3. It
-supersedes the 60 / 2 / 2 the design note pinned by hand, which the sweep puts
-last.
+`baselines.ShippedWardenParams` is the argmax of that table — 60 / 1 / 3 (it
+was 60 / 3 / 3 under GV1). It supersedes the 60 / 2 / 2 the design note pinned
+by hand.
 
 ## Keeping it honest
 
