@@ -168,11 +168,15 @@ proc requestFor(client: LlmClient, system, user: string):
   result.headers = headers
   result.body = $body
 
-proc textOf(client: LlmClient, response: Response, error, url: string): string =
+proc textOf*(client: LlmClient, response: Response, error, url: string): string =
+  ## Exported so tests can drive the captured-error path without a provider:
+  ## every message raised here ends up in a `fallback` event's `detail`, so
+  ## every slice of provider or model text below is a RUNE slice (`clip`),
+  ## never a byte slice.
   if error.len > 0:
     raise newException(LanternError, "llm transport: " & error)
   if response.code == 401 or response.code == 403:
-    let detail = response.body[0 .. min(response.body.high, 400)]
+    let detail = clip(response.body, 400)
     if "Model access is denied" in response.body and
         client.tryNextBedrockModel("no model access"):
       raise newException(LanternError, "bedrock model access denied: " & detail)
@@ -180,12 +184,12 @@ proc textOf(client: LlmClient, response: Response, error, url: string): string =
     raise newException(LanternError,
       "llm auth failed (" & $response.code & ") at " & url & ": " & detail)
   if response.code == 429:
-    let detail = response.body[0 .. min(response.body.high, 300)]
+    let detail = clip(response.body, 300)
     discard client.tryNextBedrockModel("throttled")
     raise newException(LanternError, "llm throttled (429): " & detail)
   if response.code < 200 or response.code >= 300:
     raise newException(LanternError, "anthropic error " & $response.code &
-      ": " & response.body[0 .. min(response.body.high, 300)])
+      ": " & clip(response.body, 300))
   let payload = parseJson(response.body)
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(LanternError, "anthropic refusal")
@@ -194,7 +198,7 @@ proc textOf(client: LlmClient, response: Response, error, url: string): string =
       result.add(contentBlock{"text"}.getStr())
   if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
     raise newException(LanternError, "reply cut off at max_tokens before " &
-      "any JSON: " & result[0 .. min(result.high, 160)].replace("\n", " "))
+      "any JSON: " & clip(result, 160).oneLine())
 
 proc curlySender(client: LlmClient, requests: seq[LlmRequest],
                  timeoutSeconds: int): seq[LlmReply] {.gcsafe.} =

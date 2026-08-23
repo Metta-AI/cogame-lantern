@@ -6,6 +6,7 @@
 ## invisible from the outside unless something counts the batches.
 
 import std/[json, os, strutils, times, unicode, unittest]
+import curly
 import support/helpers
 import lantern/[llm, server]
 
@@ -242,3 +243,88 @@ suite "the roster":
     check roster.prompts()[2] == "seek by sound"
     roster.seats[2].connected = true
     check policyKind(roster.seats[2]) == "llm"
+
+suite "captured provider errors are rune-safe all the way to the replay":
+  ## `textOf` slices provider and model text into the message it raises;
+  ## `curlySender` stores that message verbatim, `decideAll` copies it into
+  ## the fallback note, and the server emits it as a `fallback` event. A byte
+  ## slice anywhere on that path puts half a codepoint in the replay, which
+  ## renders in a browser and then fails the platform's strict parse.
+  const Torch = "\u{1F526}"            ## 4 bytes per rune
+  const Accent = "\u00e9"              ## 2 bytes per rune
+  const Euro = "\u20AC"                ## 3 bytes per rune: 400 is not a multiple
+
+  proc capturedSender(response: Response): auto =
+    ## Exactly `curlySender`'s capture: `textOf` raises, the message is
+    ## stored in `LlmReply.error` verbatim.
+    proc sender(client: LlmClient, requests: seq[LlmRequest],
+                timeoutSeconds: int): seq[LlmReply] {.gcsafe.} =
+      {.gcsafe.}:
+        result = newSeq[LlmReply](requests.len)
+        for index in 0 ..< requests.len:
+          try:
+            result[index].text = client.textOf(response, "",
+                                               "https://api.anthropic.com")
+          except CatchableError as error:
+            result[index].error = error.msg
+    sender
+
+  proc replayBytesFor(response: Response): (string, seq[string]) =
+    ## Drive the whole path once and hand back the replay bytes plus every
+    ## `fallback` detail that reached them.
+    let sim = testSim()
+    let client = testClient(capturedSender(response))
+    let seats = activeSeats(sim, 1, actBuild)
+    let decisions = client.decideAll(sim, 1, seats,
+      newSeq[string](sim.seats), newSeq[ScriptKind](sim.seats), false)
+    var details: seq[string]
+    var noted = 0
+    for index, slot in seats:
+      check decisions[index].source == osFallback
+      check decisions[index].notes.len >= 1
+      for note in decisions[index].notes:
+        inc noted
+        sim.emit(fallbackEvent(sim.tick, 0, slot, note.attempt, note.cause,
+                               note.detail))
+    for event in sim.events:
+      if event{"type"}.getStr() == "fallback":
+        details.add(event["detail"].getStr())
+    check details.len == noted
+    var kinds: seq[string]
+    for _ in 0 ..< sim.seats: kinds.add("scripted")
+    ($buildReplay(sim, kinds, sim.scriptedResults()), details)
+
+  test "a 429 body of 4-byte runes lands in the replay as valid UTF-8":
+    var response: Response
+    response.code = 429
+    response.body = Torch.repeat(400)     ## 1600 bytes, 400 runes
+    let (bytes, details) = replayBytesFor(response)
+    check validateUtf8(bytes) == -1
+    for detail in details:
+      check validateUtf8(detail) == -1
+      check detail.runeLen <= MaxDetailRunes
+      check Torch in detail
+
+  test "a 401 body of 3-byte runes lands in the replay as valid UTF-8":
+    var response: Response
+    response.code = 401
+    response.body = Euro.repeat(500)      ## byte 400 lands inside a rune
+    let (bytes, details) = replayBytesFor(response)
+    check validateUtf8(bytes) == -1
+    for detail in details:
+      check validateUtf8(detail) == -1
+
+  test "a max_tokens reply of the MODEL's own non-ASCII text is rune-safe":
+    ## The most reachable of the four slices: `result` here is the model's
+    ## generated text, and the system prompt invites non-ASCII in `note`/`say`.
+    var response: Response
+    response.code = 200
+    response.body = $ %*{
+      "stop_reason": "max_tokens",
+      "content": [{"type": "text",
+                   "text": "alcove " & Accent & " " & Torch.repeat(200)}]}
+    let (bytes, details) = replayBytesFor(response)
+    check validateUtf8(bytes) == -1
+    for detail in details:
+      check validateUtf8(detail) == -1
+      check detail.runeLen <= MaxDetailRunes
