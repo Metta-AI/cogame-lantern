@@ -375,7 +375,7 @@
           }
         },
         "crates_pushed": {
-          "description": "Push ticks this seat contributed.",
+          "description": "Crate shoves this seat contributed, counted at most once per crate per 12 ticks.",
           "type": "array",
           "minItems": 6,
           "maxItems": 6,

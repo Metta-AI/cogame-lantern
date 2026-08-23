@@ -423,13 +423,17 @@ proc applyTick*(sim: Sim, controls: openArray[Control]) =
           else: sim.crates[crateIndex].c.y += distance
           sim.blockDirty = true
           pushed = true
-          inc sim.cogs[slot].cratesPushed
-          sim.emit(cratePushEvent(sim.tick, slot, aliasOfSlot(slot),
-                                  crateId(crateIndex), fromPos,
-                                  sim.crates[crateIndex].c))
+          ## The crate moves every contact tick, but the shove is REPORTED at
+          ## most once per crate per PushSoundEveryTicks: one event, one ring,
+          ## one increment of the seat's push counter. A 5 s order that keeps
+          ## a cog against a crate is one shove to a spectator, not 120.
           if sim.tick - sim.crates[crateIndex].lastPushTick >=
               PushSoundEveryTicks:
             sim.crates[crateIndex].lastPushTick = sim.tick
+            inc sim.cogs[slot].cratesPushed
+            sim.emit(cratePushEvent(sim.tick, slot, aliasOfSlot(slot),
+                                    crateId(crateIndex), fromPos,
+                                    sim.crates[crateIndex].c))
             sim.addSound(sndPush, sim.crates[crateIndex].c.x,
                          sim.crates[crateIndex].c.y, PushSoundPx, PushJitterPx)
       if not pushed:

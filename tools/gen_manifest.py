@@ -193,7 +193,9 @@ RESULTS_PROPERTIES = {
     "hidden_ticks": seat_array("Hunt ticks in this seat's hiding half during which it was unfound.", INTEGER),
     "hidden_seconds": seat_array("The same, in seconds.", NUMBER),
     "finds": seat_array("Hiders this seat found while seeking.", INTEGER),
-    "crates_pushed": seat_array("Push ticks this seat contributed.", INTEGER),
+    "crates_pushed": seat_array(
+        "Crate shoves this seat contributed, counted at most once per "
+        "crate per 12 ticks.", INTEGER),
     "crates_locked": seat_array("Crates this seat bolted down.", INTEGER),
     "crates_broken": seat_array("Locked crates this seat pried open.", INTEGER),
     "team_hidden_frac": {"description": "f(team) in [0, 1], index 0 = Moth, 1 = Owl.", "type": "array", "minItems": 2, "maxItems": 2, "items": NUMBER},
