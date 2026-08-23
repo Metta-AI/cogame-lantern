@@ -1,5 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "episode_timeout_minutes": 20,
   "tags": [
     "hide-and-seek",
     "asymmetric-teams",
@@ -19,7 +20,6 @@
     },
     "description": "Lantern: 3v3 hide-and-seek in the dark on a warehouse floor, played twice with the sides swapped. Six cogs share a walled 1235x659 px floor lit only by the seekers' flashlights. In each half one trio - the hiders - gets a 30-second lights-on build act to shove and bolt 48x48 wooden crates into a fort; then the lights go out, the seekers' pen door opens, and the seekers get 75 seconds to sweep the dark. A seeker's lit set is a 420 px, 50-degree beam plus a 60 px bubble, occluded by walls and by every crate that is still standing, and the three seekers share one radio. Held in a beam for half a second, or touched, and a hider is found. A locked crate cannot be shoved by anyone - only a 3-second, very loud pry breaks it - so the fort is a real asset and breaching it is a real decision. A hider scores one tick per tick it is not yet found; then the sides swap, the map resets to its exact starting layout, and the halves are compared: score(Moth) = 0.5 + 0.5 * (f(Moth) - f(Owl)), exactly zero-sum between the sides. The game is LLM-driven: every five seconds the server sends each seat's policy prompt plus that seat's view (its role, its clock, what it can actually see, the sounds it can hear and - for a seeker - its five-band proximity heartbeat) to Claude as ONE PARALLEL BATCH, and a deterministic control layer executes the returned order at 24 Hz. A POLICY IS JUST A PROMPT - build one by reusing the published player runnable and setting the PLAYER_PROMPT environment variable to your strategy. Two scripted baselines (warden and moth) play any seat that registers as scripted, and every seat when no LLM credentials are available, so episodes always complete. In-game a cog is only ever Moth-1..Owl-3; real player names appear spectator-side only.",
     "owner": "daveey@softmax.com",
-    "episode_timeout_minutes": 20,
     "runnable": {
       "type": "game",
       "image": "{{GAME_IMAGE}}",

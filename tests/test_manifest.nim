@@ -73,8 +73,12 @@ suite "the platform contract":
   test "the replay viewer is the static bundle, never a pod":
     check game["replay_viewer"]["bundle"].getStr() == "static-replay-viewer"
 
-  test "episode_timeout_minutes is 20 and every budget fits inside 60 percent":
-    check game["episode_timeout_minutes"].getInt() == 20
+  test "episode_timeout_minutes is 20, and TOP-LEVEL where the schema puts it":
+    ## CoworldGameManifest has additionalProperties: false, so this key under
+    ## `game` is not merely ignored - it rejects the whole manifest at
+    ## `coworld build`.
+    check manifest["episode_timeout_minutes"].getInt() == 20
+    check not game.hasKey("episode_timeout_minutes")
     let budget = 20 * 60 * 6 div 10          ## 720 s
     for variant in manifest["variants"]:
       check variant["game_config"]["wallClockBudgetSeconds"].getFloat() <=

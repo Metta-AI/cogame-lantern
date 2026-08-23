@@ -290,6 +290,10 @@ PROTOCOL_GLOBAL_TEXT = (
 
 manifest = {
     "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+    # episode_timeout_minutes is a TOP-LEVEL key in the coworld manifest
+    # schema (game.additionalProperties is false), and it bounds hosted
+    # certification runs as well as league episodes.
+    "episode_timeout_minutes": 20,
     "tags": ["hide-and-seek", "asymmetric-teams", "construction", "physics",
              "real-time", "fog-of-war", "llm-driven", "six-player",
              "zero-sum", "tool-use"],
@@ -298,7 +302,6 @@ manifest = {
         "replay_viewer": {"bundle": "static-replay-viewer"},
         "description": DESCRIPTION,
         "owner": "daveey@softmax.com",
-        "episode_timeout_minutes": 20,
         "runnable": {
             "type": "game",
             "image": "{{GAME_IMAGE}}",
