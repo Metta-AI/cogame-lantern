@@ -61,6 +61,63 @@ function loadBytes(module, bytes) {
   }
 }
 
+// Boot replay-viewer/static_replay_worker.js the way a dedicated Worker does:
+// a global scope that IS `self`, importScripts() evaluating each file into
+// that scope, postMessage() captured. This is the path the browser actually
+// takes, and it is not the same as `require(lantern_replay.js)()` above: the
+// glue is MODULARIZE=1, so it only defines a factory, and the worker has to
+// call it. The original bootstrap never did - the runtime never came up and
+// the page said "loading replay" forever - and this harness, which called the
+// factory itself, stayed green through it.
+async function smokeWorkerBootstrap() {
+  const vm = require('vm');
+  const workerPath = fs.existsSync(path.join(distDir, 'static_replay_worker.js'))
+    ? path.join(distDir, 'static_replay_worker.js')
+    : path.join(__dirname, '..', 'replay-viewer', 'static_replay_worker.js');
+  const posted = [];
+  const sandbox = {
+    console, TextDecoder, TextEncoder, WebAssembly, URL, JSON, Math, Date,
+    setTimeout, clearTimeout, fetch, AbortController, Promise,
+    // The Node branch of the emscripten glue reads the wasm with fs, keyed
+    // off these three; a real Worker would fetch() it instead.
+    process, require, __filename: path.join(distDir, 'lantern_replay.js'),
+    __dirname: distDir,
+    location: { href: 'file://' + distDir + '/' },
+    postMessage: (message) => posted.push(message),
+    close: () => {},
+  };
+  sandbox.self = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  sandbox.importScripts = (...names) => {
+    for (const name of names) {
+      const file = path.join(distDir, name.replace(/^\.\//, ''));
+      if (!fs.existsSync(file)) fail('worker importScripts: no ' + file);
+      vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: file });
+    }
+  };
+  vm.runInContext(fs.readFileSync(workerPath, 'utf8'), sandbox,
+    { filename: workerPath });
+
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const errorPost = posted.find((m) => m && m.type === 'error');
+    if (errorPost) fail('worker bootstrap reported: ' + errorPost.message);
+    if (sandbox.runtimeReady === true &&
+        typeof sandbox.Module._lt_load_replay === 'function') {
+      console.log('  worker bootstrap OK: onRuntimeInitialized fired, ' +
+        'lt_load_replay reachable through the worker\'s Module');
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  fail('worker bootstrap never initialised the wasm runtime: ' +
+    'static_replay_worker.js imported lantern_replay.js but the runtime ' +
+    'never came up (runtimeReady=' + sandbox.runtimeReady + ', ' +
+    'Module._lt_load_replay=' + typeof (sandbox.Module || {})._lt_load_replay +
+    '). Is the MODULARIZE=1 factory being called?');
+}
+
 (async function main() {
   const modulePath = path.join(distDir, 'lantern_replay.js');
   if (!fs.existsSync(modulePath)) fail('no wasm module at ' + modulePath);
@@ -144,6 +201,8 @@ function loadBytes(module, bytes) {
     if (!message) fail('no error message for the malformed case: ' + label);
     console.log('  rejected (' + label + '): ' + message.slice(0, 90));
   }
+
+  await smokeWorkerBootstrap();
 
   console.log('wasm viewer smoke OK: ' + tickCount + ' ticks, ' +
     meta.events.length + ' events, ' + bursts +

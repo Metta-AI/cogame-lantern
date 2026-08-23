@@ -77,6 +77,16 @@ suite "the static replay shell":
                   "onAbort", "importScripts"]:
       check token in worker
 
+  test "the worker INSTANTIATES the MODULARIZE=1 glue after importing it":
+    ## config.nims builds lantern_replay.js with -s MODULARIZE=1, which only
+    ## defines the factory. Paintbot's bootstrap (set self.Module, wait for
+    ## onRuntimeInitialized) never fires under it, and the symptom is a page
+    ## that says "loading replay" forever with no error.
+    check "MODULARIZE=1" in readRepoFile("replay-viewer/config.nims")
+    check "EXPORT_NAME=LanternReplayModule" in readRepoFile("replay-viewer/config.nims")
+    check "self.LanternReplayModule(Module)" in worker
+    check worker.find("bootRuntime();") > worker.find("importScripts(")
+
   test "the fetch is bounded and offers a retry":
     check "AbortController" in worker
     check "FETCH_TIMEOUT_MS" in worker
