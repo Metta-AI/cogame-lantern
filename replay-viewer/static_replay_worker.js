@@ -128,6 +128,18 @@ function ingestPacket() {
     }
   }
   core.ingest(JSON.stringify(packet));
+  // The seekers' lit set, straight from the sim's occlusion grid: a byte per
+  // FovCell, refreshed with the packet. Copied out of the heap because the
+  // next frame overwrites it in place.
+  if (core.setLitMask && Module._lt_lit_len) {
+    var length = Module._lt_lit_len();
+    if (length) {
+      var pointer = Module._lt_lit_ptr();
+      core.setLitMask(Module.HEAPU8.slice(pointer, pointer + length),
+                      Module._lt_lit_cols(), Module._lt_lit_rows(),
+                      Module._lt_lit_cell());
+    }
+  }
 }
 
 function createCore(message) {

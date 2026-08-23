@@ -157,8 +157,9 @@ def main():
     crate("loose").save(os.path.join(OUT, "crate.png"))
     crate("locked").save(os.path.join(OUT, "crate_locked.png"))
     crate("broken").save(os.path.join(OUT, "crate_broken.png"))
-    cog(MOTH, lantern=False).save(os.path.join(OUT, "cog_moth.png"))
-    cog(OWL, lantern=True).save(os.path.join(OUT, "cog_owl.png"))
+    # The cogs themselves are paintbot's soldier masters (coworld-ctf
+    # data/soldier_yellow.png -> cog_moth_rig.png, soldier_blue.png ->
+    # cog_owl_rig.png), copied in rather than painted here.
     locker_plate()
     print("wrote", ", ".join(sorted(os.listdir(OUT))))
 

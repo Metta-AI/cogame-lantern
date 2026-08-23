@@ -49,7 +49,7 @@ RUN cd replay-viewer/dist && \
            chrome_common.js broadcast_core.js wire_constants.js \
            lantern_replay.js lantern_replay.wasm font.ttf \
            art/floor.jpg art/crate.png art/crate_locked.png \
-           art/crate_broken.png art/cog_moth.png art/cog_owl.png; do \
+           art/crate_broken.png art/cog_moth_rig.png art/cog_owl_rig.png; do \
     test -s "$f" || { echo "missing or empty: $f" >&2; exit 1; }; \
   done && \
   grep -q 'coworld-replay' static_replay.js && \

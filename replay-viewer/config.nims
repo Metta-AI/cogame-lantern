@@ -42,6 +42,6 @@ switch(
   -s MODULARIZE=1
   -s EXPORT_NAME=LanternReplayModule
   -s EXPORTED_RUNTIME_METHODS=HEAPU8
-  -s EXPORTED_FUNCTIONS=_main,_malloc,_free,_lt_load_replay,_lt_frame,_lt_seek,_lt_tick,_lt_tick_count,_lt_mismatch_tick,_lt_meta_ptr,_lt_meta_len,_lt_packet_ptr,_lt_packet_len,_lt_error_ptr,_lt_error_len,_lt_stage_ptr,_lt_stage_len
+  -s EXPORTED_FUNCTIONS=_main,_malloc,_free,_lt_load_replay,_lt_frame,_lt_seek,_lt_tick,_lt_tick_count,_lt_mismatch_tick,_lt_meta_ptr,_lt_meta_len,_lt_packet_ptr,_lt_packet_len,_lt_error_ptr,_lt_error_len,_lt_stage_ptr,_lt_stage_len,_lt_lit_ptr,_lt_lit_len,_lt_lit_cols,_lt_lit_rows,_lt_lit_cell
   """).replace("\n", " ")
 )

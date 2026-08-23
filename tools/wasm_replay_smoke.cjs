@@ -266,6 +266,68 @@ async function smokeHoldReleases(replay) {
     (found.t + 12));
 }
 
+// The lit mask is the sim's own occlusion, not a cone painted over the
+// board: every seeker's own cell is lit (the omni bubble), and the first
+// cell BEHIND a wall on a seeker's aim ray, inside lantern range, is dark.
+function smokeLitMask(module, replay) {
+  if (typeof module._lt_lit_ptr !== 'function') {
+    fail('the module does not export lt_lit_ptr: the renderer has no occlusion');
+  }
+  const cols = module._lt_lit_cols(), rows = module._lt_lit_rows();
+  const cell = module._lt_lit_cell();
+  const mask = () => {
+    const n = module._lt_lit_len();
+    const p = module._lt_lit_ptr();
+    return module.HEAPU8.subarray(p, p + n);
+  };
+  const meta = JSON.parse(readString(module, module._lt_meta_ptr, module._lt_meta_len));
+  const walls = (meta.map && meta.map.obstacles) || [];
+  const inWall = (x, y) => walls.some((w) =>
+    x >= w.x && x < w.x + w.w && y >= w.y && y < w.y + w.h);
+  const at = (x, y) => mask()[Math.floor(y / cell) * cols + Math.floor(x / cell)];
+  const range = (meta.config && meta.config.lanternRangePx) || 420;
+
+  // Build act: the lanterns are off and the mask is all dark.
+  module._lt_seek(1);
+  if (mask().some((v) => v)) fail('the lit mask is not dark during the build act');
+
+  const hunt = replay.events.find((e) => e.type === 'act_start' && e.act === 'hunt');
+  if (!hunt) fail('no hunt act_start in the fixture');
+  module._lt_seek(hunt.t + 48);
+  const packet = packetOf(module);
+  const seekers = packet.cogs.filter((c) => c.role === 'seeker');
+  if (!seekers.length) fail('no seekers in the hunt packet');
+  let shadowed = 0;
+  for (const cog of seekers) {
+    if (!at(cog.x, cog.y)) {
+      fail(`seeker ${cog.alias} at (${cog.x},${cog.y}) is not in its own lit set`);
+    }
+    // Walk the aim ray until it enters a wall, then one cell further.
+    const heading = -cog.aim * Math.PI * 2 / 256;
+    let hit = null;
+    for (let d = 8; d < range; d += 2) {
+      const x = Math.round(cog.x + Math.cos(heading) * d);
+      const y = Math.round(cog.y + Math.sin(heading) * d);
+      if (x < 0 || y < 0 || x >= meta.map.width || y >= meta.map.height) break;
+      if (inWall(x, y)) { hit = { x, y, d }; break; }
+    }
+    if (!hit) continue;
+    const d = hit.d + 2 * cell + 2;
+    if (d >= range - cell) continue;
+    const bx = Math.round(cog.x + Math.cos(heading) * d);
+    const by = Math.round(cog.y + Math.sin(heading) * d);
+    if (inWall(bx, by)) continue;
+    if (at(bx, by)) {
+      fail(`cell (${bx},${by}) behind the wall at (${hit.x},${hit.y}) on ` +
+        `${cog.alias}'s aim ray is lit: the mask ignores occlusion`);
+    }
+    shadowed++;
+  }
+  console.log('  lit mask OK: ' + cols + 'x' + rows + ' cells of ' + cell +
+    ' px, seekers lit at their own cell, ' + shadowed +
+    ' wall shadow(s) on aim rays checked');
+}
+
 (async function main() {
   smokeCanvasBitmapSize();
   const modulePath = path.join(distDir, 'lantern_replay.js');
@@ -293,6 +355,8 @@ async function smokeHoldReleases(replay) {
   const meta = JSON.parse(readString(module, module._lt_meta_ptr, module._lt_meta_len));
   if (meta.protocol !== 'lantern.replay.v1') fail('bad meta protocol');
   if (!meta.events.length || !meta.results) fail('meta is missing events/results');
+  smokeLitMask(module, replay);
+  module._lt_seek(0);
 
   // Advance to the end one tick at a time, collecting the find bursts the
   // renderer draws its expanding ring on.

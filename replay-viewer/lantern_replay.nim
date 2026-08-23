@@ -25,6 +25,10 @@ var
   worldMap: MapSpec
   tickCount: int
   mismatchTick = -1
+  litMask: seq[uint8]
+    ## The seekers' lit set on the FovCell grid, one byte per cell, refreshed
+    ## with every packet during the hunt: exactly `teamLit` at the cell
+    ## centre, so the renderer paints the same occlusion the sim detects with.
   bursts: seq[array[2, int]]
     ## Find flashes since the last packet: where a hider was standing on the
     ## tick it was found, before the sim teleported it into the caught pen.
@@ -35,8 +39,20 @@ proc bytesFromPointer(data: ptr uint8, length: int): string =
   if length > 0:
     copyMem(result[0].addr, data, length)
 
+proc refreshLitMask() =
+  if litMask.len != FovW * FovH:
+    litMask = newSeq[uint8](FovW * FovH)
+  let lit = world.lanternsOn()
+  for cy in 0 ..< FovH:
+    let y = min(cy * FovCell + FovCell div 2, MapHeight - 1)
+    for cx in 0 ..< FovW:
+      let x = min(cx * FovCell + FovCell div 2, MapWidth - 1)
+      litMask[cy * FovW + cx] =
+        if lit and world.teamLit(x, y): 1'u8 else: 0'u8
+
 proc packetJson(): string =
   let phase = phaseAt(worldConfig, min(world.tick, tickCount - 1))
+  refreshLitMask()
   var cogs = newJArray()
   var hb = newJArray()
   var hidden = [0, 0]
@@ -209,6 +225,16 @@ proc ltPacketPointer(): ptr uint8 {.exportc: "lt_packet_ptr", cdecl.} =
 
 proc ltPacketLength(): cint {.exportc: "lt_packet_len", cdecl.} =
   cint(packet.len)
+
+proc ltLitPointer(): ptr uint8 {.exportc: "lt_lit_ptr", cdecl.} =
+  if litMask.len == 0: nil else: cast[ptr uint8](litMask[0].addr)
+
+proc ltLitLength(): cint {.exportc: "lt_lit_len", cdecl.} =
+  cint(litMask.len)
+
+proc ltLitCols(): cint {.exportc: "lt_lit_cols", cdecl.} = cint(FovW)
+proc ltLitRows(): cint {.exportc: "lt_lit_rows", cdecl.} = cint(FovH)
+proc ltLitCell(): cint {.exportc: "lt_lit_cell", cdecl.} = cint(FovCell)
 
 proc ltErrorPointer(): ptr uint8 {.exportc: "lt_error_ptr", cdecl.} =
   if lastError.len == 0: nil else: cast[ptr uint8](lastError[0].addr)

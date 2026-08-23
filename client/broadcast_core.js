@@ -43,7 +43,7 @@
     function loadArt() {
       if (typeof fetch !== 'function' || typeof createImageBitmap !== 'function') return;
       ['floor.jpg', 'crate.png', 'crate_locked.png', 'crate_broken.png',
-       'cog_moth.png', 'cog_owl.png'].forEach(function (name) {
+       'cog_moth_rig.png', 'cog_owl_rig.png'].forEach(function (name) {
         fetch(ART_BASE + '/' + name)
           .then(function (r) { return r.ok ? r.blob() : null; })
           .then(function (blob) { return blob ? createImageBitmap(blob) : null; })
@@ -53,12 +53,78 @@
             if (name === 'floor.jpg') {
               floorPattern = context.createPattern(bitmap, 'repeat');
             }
+            if (name.indexOf('_rig.png') > 0) rigs[name] = measureRig(bitmap);
             if (state) draw();
           })
           .catch(function () { /* procedural fallback */ });
       });
     }
     loadArt();
+
+    // ---- cog rigs ----------------------------------------------------------
+    // Paintbot's soldier masters, used exactly as drawn: the canonical
+    // Cogs-vs-Clips cog facing SOUTH, visor visible. As in coworld-ctf's
+    // rig_art.nim the body pivot is the centroid of the SOLID pixels
+    // (alpha >= 200, the shell - not the feathered outline) and the master is
+    // scaled so that solid span stands RigBodyPx tall; the sprite then turns
+    // as one rigid unit so the visor faces the aim.
+    var RigBodyPx = 34;
+    var RigSolidAlpha = 200;
+    var rigs = {};
+    function measureRig(bitmap) {
+      var w = bitmap.width, h = bitmap.height;
+      var rig = { bitmap: bitmap, px: w / 2, py: h / 2, scale: RigBodyPx / h };
+      if (typeof OffscreenCanvas !== 'function') return rig;
+      try {
+        var scratch = new OffscreenCanvas(w, h);
+        var sc = scratch.getContext('2d');
+        sc.drawImage(bitmap, 0, 0);
+        var data = sc.getImageData(0, 0, w, h).data;
+        var sx = 0, sy = 0, n = 0, top = h, bottom = -1;
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            if (data[(y * w + x) * 4 + 3] >= RigSolidAlpha) {
+              sx += x; sy += y; n++;
+              if (y < top) top = y;
+              if (y > bottom) bottom = y;
+            }
+          }
+        }
+        if (n) {
+          rig.px = sx / n; rig.py = sy / n;
+          rig.scale = RigBodyPx / Math.max(1, bottom - top + 1);
+        }
+      } catch (ignored) { /* keep the geometric centre */ }
+      return rig;
+    }
+
+    // ---- the seekers' lit set ----------------------------------------------
+    // One byte per FovCell from the wasm module: exactly the sim's teamLit at
+    // the cell centre (cone + omni bubble, cut by walls, crates and the pen
+    // door through the same lineOfSight the detection rule uses). Kept as a
+    // tiny cols x rows bitmap and stretched over the board with bilinear
+    // filtering, so the occlusion edges read as soft light rather than tiles.
+    var litMask = null;       // { cols, rows, cell, canvas }
+    var lightLayer = null;    // board-sized scratch the cones are built in
+    function setLitMask(bytes, cols, rows, cell) {
+      if (typeof OffscreenCanvas !== 'function' || !cols || !rows) return;
+      if (!litMask || litMask.cols !== cols || litMask.rows !== rows) {
+        litMask = { cols: cols, rows: rows, cell: cell,
+                    canvas: new OffscreenCanvas(cols, rows) };
+        litMask.image = litMask.canvas.getContext('2d').createImageData(cols, rows);
+      }
+      var pixels = litMask.image.data;
+      var any = false;
+      for (var i = 0; i < cols * rows; i++) {
+        var on = bytes[i] ? 255 : 0;
+        pixels[i * 4] = 255; pixels[i * 4 + 1] = 255; pixels[i * 4 + 2] = 255;
+        pixels[i * 4 + 3] = on;
+        if (on) any = true;
+      }
+      litMask.canvas.getContext('2d').putImageData(litMask.image, 0, 0);
+      litMask.any = any;
+      if (state) draw();
+    }
 
     function transform() {
       var fit = Math.min(viewport.width / MAP_W, viewport.height / MAP_H);
@@ -143,10 +209,17 @@
       var walls = meta.map.obstacles || [];
       for (var i = 0; i < walls.length; i++) {
         var w = walls[i];
-        context.fillStyle = '#2c231b';
+        // Steel racking: a mid-tone body that separates from the dark floor,
+        // a lit top edge and a drop shadow beneath so the slab reads as
+        // standing on the floor rather than painted on it.
+        context.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        context.fillRect(w.x + 2, w.y + 3, w.w, w.h);
+        context.fillStyle = '#6b5a47';
         context.fillRect(w.x, w.y, w.w, w.h);
-        context.fillStyle = 'rgba(242, 232, 216, 0.10)';
+        context.fillStyle = 'rgba(242, 232, 216, 0.28)';
         context.fillRect(w.x, w.y, w.w, 2);
+        context.fillStyle = 'rgba(0, 0, 0, 0.35)';
+        context.fillRect(w.x, w.y + w.h - 2, w.w, 2);
       }
       var pen = meta.map.pen;
       if (pen) {
@@ -208,41 +281,70 @@
       return { range: range, half: half, heading: heading };
     }
 
-    function drawLight() {
-      if (!state || state.act !== 'hunt') return;
-      // The lit union is painted into a scratch layer with 'lighter' so
-      // overlapping cones add rather than darken, then multiplied over the
-      // board by #lightpool in the page. Here we paint the cones themselves.
+    function paintCones(ctx) {
       for (var i = 0; i < state.cogs.length; i++) {
         var cog = state.cogs[i];
         if (cog.role !== 'seeker') continue;
         var cone = coneFor(cog);
-        var gradient = context.createRadialGradient(
+        var gradient = ctx.createRadialGradient(
           cog.x, cog.y, 8, cog.x, cog.y, cone.range);
         gradient.addColorStop(0, 'rgba(255, 246, 214, 0.42)');
         gradient.addColorStop(1, 'rgba(255, 246, 214, 0.0)');
-        context.fillStyle = gradient;
-        context.beginPath();
-        context.moveTo(cog.x, cog.y);
-        context.arc(cog.x, cog.y, cone.range,
-                    cone.heading - cone.half, cone.heading + cone.half);
-        context.closePath();
-        context.fill();
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(cog.x, cog.y);
+        ctx.arc(cog.x, cog.y, cone.range,
+                cone.heading - cone.half, cone.heading + cone.half);
+        ctx.closePath();
+        ctx.fill();
         // hot core along the aim ray
-        context.strokeStyle = 'rgba(255, 252, 240, 0.30)';
-        context.lineWidth = 6;
-        context.beginPath();
-        context.moveTo(cog.x, cog.y);
-        context.lineTo(cog.x + Math.cos(cone.heading) * cone.range,
-                       cog.y + Math.sin(cone.heading) * cone.range);
-        context.stroke();
+        ctx.strokeStyle = 'rgba(255, 252, 240, 0.30)';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(cog.x, cog.y);
+        ctx.lineTo(cog.x + Math.cos(cone.heading) * cone.range,
+                   cog.y + Math.sin(cone.heading) * cone.range);
+        ctx.stroke();
         // the omni bubble
-        context.strokeStyle = 'rgba(255, 246, 214, 0.16)';
-        context.lineWidth = 2;
-        context.beginPath();
-        context.arc(cog.x, cog.y, 60, 0, Math.PI * 2);
-        context.stroke();
+        ctx.fillStyle = 'rgba(255, 246, 214, 0.10)';
+        ctx.beginPath();
+        ctx.arc(cog.x, cog.y, 60, 0, Math.PI * 2);
+        ctx.fill();
       }
+    }
+
+    function drawLight() {
+      if (!state || state.act !== 'hunt') return;
+      // The cones are painted into a board-sized scratch layer with 'lighter'
+      // so overlapping cones add rather than darken, then CUT to the sim's
+      // lit set: what is left is exactly what the seekers can see, walls,
+      // crates and the pen door throwing the same shadows the detection rule
+      // sees. Without the mask (no OffscreenCanvas, or a build act) the raw
+      // cones are drawn straight onto the board.
+      if (!litMask || typeof OffscreenCanvas !== 'function') {
+        context.save();
+        context.globalCompositeOperation = 'lighter';
+        paintCones(context);
+        context.restore();
+        return;
+      }
+      if (!lightLayer) lightLayer = new OffscreenCanvas(MAP_W, MAP_H);
+      var lc = lightLayer.getContext('2d');
+      lc.setTransform(1, 0, 0, 1, 0, 0);
+      lc.globalCompositeOperation = 'source-over';
+      lc.clearRect(0, 0, MAP_W, MAP_H);
+      if (!litMask.any) return;
+      lc.globalCompositeOperation = 'lighter';
+      paintCones(lc);
+      lc.globalCompositeOperation = 'destination-in';
+      lc.imageSmoothingEnabled = true;
+      lc.imageSmoothingQuality = 'high';
+      // Cell centres were sampled, so the bitmap spans the board shifted by
+      // half a cell; stretching cols x rows over cols*cell x rows*cell puts
+      // each sample at the centre of its cell.
+      lc.drawImage(litMask.canvas, 0, 0,
+                   litMask.cols * litMask.cell, litMask.rows * litMask.cell);
+      context.drawImage(lightLayer, 0, 0);
     }
 
     function drawSounds() {
@@ -271,25 +373,29 @@
         if (cog.state === 3) continue;   // found: sitting in the caught pen
         var colour = cog.team === 'Moth' ? '#f2c14e' : '#4ecdc4';
         var lit = cog.role === 'seeker' || cog.lit || state.act === 'build';
-        var rig = art[cog.team === 'Moth' ? 'cog_moth.png' : 'cog_owl.png'];
+        var rig = rigs[cog.team === 'Moth' ? 'cog_moth_rig.png' : 'cog_owl_rig.png'];
         if (rig) {
           context.save();
-          context.globalAlpha = lit ? 1 : 0.3;
+          context.globalAlpha = lit ? 1 : 0.3;   // the spectator's dramatic irony
           context.translate(cog.x, cog.y);
-          context.rotate(-cog.aim * Math.PI * 2 / 256);
-          context.drawImage(rig, -18, -18, 36, 36);
+          // The master faces SOUTH (+y); turn it so the visor faces the aim
+          // (0 = east, brads counter-clockwise).
+          context.rotate(-cog.aim * Math.PI * 2 / 256 - Math.PI / 2);
+          var scale = rig.scale * (cog.state === 2 ? 0.82 : 1);   // crawling: low
+          context.scale(scale, scale);
+          context.drawImage(rig.bitmap, -rig.px, -rig.py);
           context.restore();
           if (!lit) {
             context.strokeStyle = colour;
             context.lineWidth = 1.5;
             context.beginPath();
-            context.arc(cog.x, cog.y, 11, 0, Math.PI * 2);
+            context.arc(cog.x, cog.y, RigBodyPx / 2 + 2, 0, Math.PI * 2);
             context.stroke();
           }
           context.fillStyle = 'rgba(242, 232, 216, ' + (lit ? 0.9 : 0.35) + ')';
           context.font = '11px sans-serif';
           context.textAlign = 'center';
-          context.fillText(cog.alias, cog.x, cog.y - 20);
+          context.fillText(cog.alias, cog.x, cog.y - RigBodyPx / 2 - 5);
           continue;
         }
         context.save();
@@ -435,6 +541,7 @@
         zoom = 1; focusX = MAP_W / 2; focusY = MAP_H / 2;
         emitTransform(); if (state) draw();
       },
+      setLitMask: setLitMask,
       attachMinimap: function (surface) {
         minimap = surface;
         minimapContext = surface ? surface.getContext('2d') : null;
