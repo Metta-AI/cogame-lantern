@@ -33,6 +33,7 @@ proc defaultGameConfig*(): GameConfig =
     showPlayerLabels: true,
     gameOverTicks: 96,
     episodeTimeoutMs: 1_200_000,
+    shutdownGraceMs: 20_000,
     model: "claude-sonnet-5",
     maxOutputTokens: 900
   )
@@ -113,6 +114,8 @@ proc update*(config: var GameConfig, configJson: string) =
       config.playerConnectTimeoutMs = millisOf(node[key])
   if node.hasKey("episodeTimeoutSeconds"):
     config.episodeTimeoutMs = millisOf(node["episodeTimeoutSeconds"])
+  if node.hasKey("shutdownGraceSeconds"):
+    config.shutdownGraceMs = millisOf(node["shutdownGraceSeconds"])
 
   if config.numAgents != Seats:
     raise newException(LanternError,
@@ -159,6 +162,7 @@ proc configJson*(config: GameConfig): JsonNode =
     "mapPath": config.mapPath,
     "showPlayerLabels": config.showPlayerLabels,
     "gameOverTicks": config.gameOverTicks,
+    "shutdownGraceSeconds": config.shutdownGraceMs.float / 1000.0,
     "players": players
   }
 

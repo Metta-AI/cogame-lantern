@@ -141,7 +141,8 @@ suite "the platform contract":
                 "playerConnectTimeoutSeconds", "lanternRangePx",
                 "lanternConeBrads", "visionBubblePx", "crateCount",
                 "lockTicks", "pryTicks", "lockOnTicks", "maxLocksPerHider",
-                "mapPath", "showPlayerLabels", "gameOverTicks"]:
+                "mapPath", "showPlayerLabels", "gameOverTicks",
+                "shutdownGraceSeconds"]:
       check properties.hasKey(key)
     check properties["num_agents"]["default"].getInt() == Seats
 

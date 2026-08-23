@@ -294,6 +294,7 @@ type
     showPlayerLabels*: bool
     gameOverTicks*: int
     episodeTimeoutMs*: int
+    shutdownGraceMs*: int
     model*: string
     maxOutputTokens*: int
 

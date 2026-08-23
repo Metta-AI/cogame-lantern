@@ -156,6 +156,23 @@ suite "the server":
     delEnv("COGAME_EVENTS_URI")
     delEnv("COGAME_METRICS_URI")
 
+  test "the shutdown grace is bounded, non-zero and inside the episode budget":
+    ## The platform's runner holds its /global viewer open while the player
+    ## pods start and only THEN pings, with a 2 s deadline. A lantern
+    ## certification episode is ~2 s of wall clock, so a server that exits the
+    ## moment it writes its artifacts closes that socket underneath the ping
+    ## and hosted certification fails with "did not answer a WebSocket Ping
+    ## with Pong". The grace closes that window; it must stay bounded so the
+    ## container still exits, and stay far inside the episode timeout.
+    let defaults = defaultGameConfig()
+    check defaults.shutdownGraceMs >= 10_000
+    check defaults.shutdownGraceMs <= 60_000
+    check defaults.shutdownGraceMs * 10 < defaults.episodeTimeoutMs
+    var tuned = defaultGameConfig()
+    tuned.update("""{"num_agents": 6, "shutdownGraceSeconds": 5}""")
+    check tuned.shutdownGraceMs == 5_000
+    check configJson(tuned)["shutdownGraceSeconds"].getFloat() == 5.0
+
   test "replay mode serves /replay-data":
     ## In live mode there is no replay payload, so the route 404s rather than
     ## inventing one.

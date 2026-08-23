@@ -159,6 +159,17 @@ CONFIG_PROPERTIES = {
         "description": "Ticks the viewer holds on the endcard after the final tick.",
         "type": "integer", "minimum": 0, "maximum": 600, "default": 96,
     },
+    "shutdownGraceSeconds": {
+        "description": (
+            "Seconds the game keeps serving /healthz and /global AFTER it has "
+            "written its artifacts, before it exits. The platform's runner "
+            "holds a spectator socket open while the player pods start and "
+            "then pings it with a 2 s deadline; a scripted lantern episode is "
+            "about two seconds of wall clock, so a server that exits "
+            "immediately closes that socket underneath the ping."
+        ),
+        "type": "number", "minimum": 0, "maximum": 120, "default": 20,
+    },
     "episodeTimeoutSeconds": {
         "description": "Assumed platform kill time when the env is silent. Lantern plays inside 60 percent of it.",
         "type": "number", "minimum": 60, "maximum": 3600, "default": 1200,

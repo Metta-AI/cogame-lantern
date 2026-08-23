@@ -355,8 +355,28 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                     "COGAME_RESULTS_METHOD")
     except CatchableError as error:
       echo "lantern: results write failed: ", error.msg
-    sleep(300)
-    echo "lantern: episode complete, shutting down"
+    ## SHUTDOWN GRACE. Do not vanish the instant the artifacts are written.
+    ##
+    ## A lantern certification episode is six scripted seats over 1440 ticks -
+    ## about two seconds of wall clock. The platform's episode runner connects
+    ## its spectator viewer to /global and then BLOCKS, holding the socket
+    ## open while the player pods start, before it pings with a 2 s deadline
+    ## (`_require_websocket_pong`). Exiting as soon as the episode ends closes
+    ## that socket underneath the ping, and hosted certification fails with
+    ## "Game websocket did not answer a WebSocket Ping with Pong: ...: no
+    ## close frame received or sent" - which is a startup race, not a game
+    ## fault, and it cost lantern 0.1.3's hosted certification.
+    ##
+    ## So keep serving /healthz and /global for a bounded grace, then exit.
+    ## The runner is waiting for this process to exit and gives it the whole
+    ## episode timeout to do so, so twenty seconds is free.
+    let graceDeadline = nowMs() + max(0, config.shutdownGraceMs)
+    echo "lantern: episode complete; serving for ",
+      config.shutdownGraceMs div 1000, "s more so a late spectator or a ",
+      "certification ping still finds the socket alive"
+    while nowMs() < graceDeadline:
+      sleep(200)
+    echo "lantern: shutting down"
     quit(0)
 
 var gameThread: Thread[RuntimeConfig]
