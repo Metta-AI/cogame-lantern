@@ -87,8 +87,13 @@ mouth.
 
 ## Changing the art
 
-`python3 scripts/art/build_art.py`. Committed output under `client/art/`; the
-bundle is hermetic and downloads nothing.
+`python3 scripts/art/build_art.py` for the floor, crates and lockerroom plate.
+The two cog sprites (`client/art/cog_owl_rig.png`, `cog_moth_rig.png`) are
+nano-banana (Gemini image) renders of the Softmax cog — the Owl warden with a
+brass lantern, the Moth with spread wing panels — regenerated from the
+committed sheet with `python3 scripts/art/split_cog_sheet.py`
+(`scripts/art/source/cogs_sheet.png`). Committed output under `client/art/`;
+the bundle is hermetic and downloads nothing.
 
 ## Testing
 
