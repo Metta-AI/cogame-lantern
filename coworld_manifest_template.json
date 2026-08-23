@@ -22,7 +22,7 @@
     "owner": "daveey@softmax.com",
     "runnable": {
       "type": "game",
-      "image": "{{GAME_IMAGE}}",
+      "image": "{{LANTERN_IMAGE}}",
       "run": [
         "/bin/lantern"
       ],
@@ -565,7 +565,7 @@
       "name": "warden",
       "type": "player",
       "description": "The bundled certification player: registers as the warden scripted baseline and plays deterministically, with no LLM. Field your own policy by uploading this same image with PLAYER_PROMPT set to your strategy.",
-      "image": "{{PLAYER_IMAGE}}",
+      "image": "{{LANTERN_IMAGE}}",
       "run": [
         "/bin/lantern-player"
       ],

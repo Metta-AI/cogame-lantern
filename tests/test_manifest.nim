@@ -108,15 +108,29 @@ suite "the platform contract":
     check ids == @["rules.md", "protocol.md"]
 
   test "the image placeholders and entrypoints line up with compose.yaml":
-    check game["runnable"]["image"].getStr() == "{{GAME_IMAGE}}"
+    ## `coworld build` derives the placeholder from the COMPOSE SERVICE NAME
+    ## (`_compose_image_placeholders`: service `lantern` -> {{LANTERN_IMAGE}}),
+    ## and rejects the whole build with "Coworld image placeholder does not
+    ## match a Compose service" for anything else. Derive it here the same
+    ## way rather than hard-coding it twice.
+    let composeText = readRepoFile("compose.yaml")
+    var service = ""
+    for line in composeText.splitLines():
+      if line.startsWith("  ") and line.strip().endsWith(":") and
+          not line.startsWith("    "):
+        service = line.strip().strip(chars = {':'})
+        break
+    check service == "lantern"
+    let placeholder = "{{" & service.toUpperAscii().replace("-", "_") &
+      "_IMAGE}}"
+    check game["runnable"]["image"].getStr() == placeholder
     check game["runnable"]["run"][0].getStr() == "/bin/lantern"
-    check manifest["player"][0]["image"].getStr() == "{{PLAYER_IMAGE}}"
+    check manifest["player"][0]["image"].getStr() == placeholder
     check manifest["player"][0]["run"][0].getStr() == "/bin/lantern-player"
     check manifest["player"][0]["env"]["PLAYER_SCRIPTED"].getStr() == "warden"
-    let compose = readRepoFile("compose.yaml")
-    check "image: coworld-lantern:latest" in compose
-    check "platform: linux/amd64" in compose
-    check "network: host" in compose
+    check "image: coworld-lantern:latest" in composeText
+    check "platform: linux/amd64" in composeText
+    check "network: host" in composeText
     check "coworld-lantern" in readRepoFile(".github/workflows/ci.yml")
 
   test "config_schema declares num_agents and every knob the server reads":

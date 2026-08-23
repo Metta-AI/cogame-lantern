@@ -12,6 +12,8 @@ def read(name):
 
 SEATS = 6
 SOURCE = "https://github.com/Metta-AI/cogame-lantern/tree/main"
+COMPOSE_SERVICE = "lantern"
+IMAGE_PLACEHOLDER = "{{" + COMPOSE_SERVICE.upper().replace("-", "_") + "_IMAGE}}"
 
 CHAMPION_ONE = read("docs/prompts/lantern-warren.txt").strip()
 CHAMPION_TWO = read("docs/prompts/lantern-owlnight.txt").strip()
@@ -306,7 +308,13 @@ manifest = {
         "owner": "daveey@softmax.com",
         "runnable": {
             "type": "game",
-            "image": "{{GAME_IMAGE}}",
+            # `coworld build` derives the placeholders from the COMPOSE
+            # SERVICE NAMES: `_compose_image_placeholders` maps a service
+            # `lantern` to `{{LANTERN_IMAGE}}`, and any other `{{...}}` image
+            # is a hard error ("Coworld image placeholder does not match a
+            # Compose service"). One service means one placeholder for both
+            # runnables - lantern ships one image with two entrypoints.
+            "image": IMAGE_PLACEHOLDER,
             "run": ["/bin/lantern"],
             "env": {"ANTHROPIC_API_KEY_URI": "secret://coworld/lantern/anthropic_api_key"},
             "source_url": SOURCE,
@@ -350,7 +358,7 @@ manifest = {
                 "Field your own policy by uploading this same image with "
                 "PLAYER_PROMPT set to your strategy."
             ),
-            "image": "{{PLAYER_IMAGE}}",
+            "image": IMAGE_PLACEHOLDER,
             "run": ["/bin/lantern-player"],
             "env": {"PLAYER_SCRIPTED": "warden"},
             "resources": {"requests": {"cpu": "100m", "memory": "64Mi"},
