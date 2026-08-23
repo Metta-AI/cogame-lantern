@@ -396,6 +396,17 @@ proc splicedBroadcastPage(): string =
   result = result.replace("<!-- BROADCAST_CORE -->",
     "<script src=\"/client/static_replay.js\"></script>")
 
+proc pageHandler(name: string): RequestHandler =
+  ## A static page from client/. These two routes are part of the platform's
+  ## GAME CONTRACT, not decoration: the episode runner does
+  ## `GET /client/player?slot=0&token=<t>` and `GET /client/global` before it
+  ## starts a single player container, and a 404 on either fails
+  ## certification's smoke-episode with `game_contract_violation`.
+  proc handler(request: Request) {.gcsafe.} =
+    {.gcsafe.}:
+      serveFile(request, clientDir() / name, "text/html; charset=utf-8")
+  handler
+
 proc replayPageHandler(request: Request) {.gcsafe.} =
   {.gcsafe.}:
     let path = clientDir() / "replay_broadcast.html"
@@ -466,6 +477,16 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
         "hides_in_half": hidHalfOfSlot(slot),
         "turns": totalTurns(state.config)})
 
+proc replayUpgradeHandler(request: Request) {.gcsafe.} =
+  ## The replay-mode websocket. `verify_replay_loadable` in the platform's
+  ## runner opens this and requires ONE non-empty message; lantern's hosted
+  ## replays are the static wasm bundle, so that check is skipped, but the
+  ## route is cheap and a local viewer uses the same payload.
+  {.gcsafe.}:
+    let websocket = request.upgradeToWebSocket()
+    if replayPayloadGlobal.len > 0:
+      websocket.send(replayPayloadGlobal)
+
 proc globalUpgradeHandler(request: Request) {.gcsafe.} =
   {.gcsafe.}:
     let websocket = request.upgradeToWebSocket()
@@ -519,10 +540,17 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
 
 proc buildRouter(replayMode: bool): Router =
   result.get("/healthz", healthzHandler)
+  ## The three named client pages come BEFORE the /client/@name asset route:
+  ## mummy tests routes in registration order, so the catch-all would
+  ## otherwise swallow /client/player and /client/global and serve them as
+  ## missing asset files.
   result.get("/client/replay", replayPageHandler)
+  result.get("/client/global", pageHandler("global.html"))
+  result.get("/client/player", pageHandler("player.html"))
   result.get("/client/@name", clientAssetHandler)
   result.get("/replay-data", replayDataHandler)
   result.get("/global", globalUpgradeHandler)
+  result.get("/replay", replayUpgradeHandler)
   if not replayMode:
     result.get("/player", playerUpgradeHandler)
 

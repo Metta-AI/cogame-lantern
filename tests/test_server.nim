@@ -102,6 +102,22 @@ suite "the server":
       aliases.add(cog["alias"].getStr())
     check aliases == @["Moth-1", "Owl-1", "Moth-2", "Owl-2", "Moth-3", "Owl-3"]
 
+  test "the platform's GAME CONTRACT routes all answer 200":
+    ## The episode runner does exactly these, before it starts a single
+    ## player container: healthz, GET /client/player?slot=0&token=<t>, a bad
+    ## token on the player websocket (must be refused 401/403), and
+    ## GET /client/global. A 404 on any of them fails certification's
+    ## smoke-episode with `game_contract_violation`, two phases after the
+    ## mistake is made - which is exactly what happened on release 0.1.1.
+    check httpGet("/healthz").code == Http200
+    let seat = httpGet("/client/player?slot=0&token=t0")
+    check seat.code == Http200
+    check "lantern" in seat.body
+    let spectator = httpGet("/client/global")
+    check spectator.code == Http200
+    check "/global" in spectator.body
+    check httpGet("/player?slot=0&token=bad").code == Http403
+
   test "/client/replay is served SPLICED, never raw":
     let page = httpGet("/client/replay")
     check page.code == Http200

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lantern &mdash; seat</title>
+<!--
+  The per-seat page, served at /client/player?slot=N&token=T. It is one of the
+  two HTTP routes the platform's episode runner requires of a game container.
+
+  It is deliberately VIEW-ONLY, and it deliberately does NOT open the player
+  websocket: a lantern seat's socket is single-occupancy (a second connection
+  on a live slot is answered 409), so a browser dialling /player would either
+  be refused or steal the seat from the policy container. It reads the
+  spectator stream instead and shows this seat's cog.
+
+  A lantern policy is a prompt. There is nothing to click here, because there
+  is nothing for a human to decide: the game server composes this seat's view
+  and its PLAYER_PROMPT and asks Claude for one order every five seconds.
+-->
+<style>
+  :root { --paper:#f2e8d8; --moth:#f2c14e; --owl:#4ecdc4; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #120d09; color: var(--paper);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px; }
+  h1 { font-size: 20px; letter-spacing: 1px; margin-bottom: 2px; }
+  h1 .team { font-weight: 700; }
+  .sub { color: #8a7f72; font-size: 13px; margin-bottom: 16px; }
+  .card { background: rgba(20,14,9,0.72); border: 1px solid rgba(242,232,216,0.16);
+    border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
+  .row { display: flex; justify-content: space-between; gap: 12px;
+    padding: 3px 0; font-size: 14px; }
+  .row span:first-child { color: #8a7f72; }
+  .note { font-size: 13px; line-height: 1.55; color: #c9bda9; }
+  .say { font-size: 15px; color: var(--paper); }
+  code { background: rgba(242,232,216,0.08); padding: 1px 5px; border-radius: 3px;
+    font-size: 12px; }
+  #status { color: #8a7f72; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1><span class="team" id="alias">seat</span> &mdash; lantern</h1>
+  <div class="sub" id="role">waiting for the game&hellip;</div>
+
+  <div class="card">
+    <div class="row"><span>half / act</span><span id="act">&mdash;</span></div>
+    <div class="row"><span>turn</span><span id="turn">&mdash;</span></div>
+    <div class="row"><span>act time left</span><span id="clock">&mdash;</span></div>
+    <div class="row"><span>position</span><span id="pos">&mdash;</span></div>
+    <div class="row"><span>hidden this half</span><span id="hidden">&mdash;</span></div>
+    <div class="row"><span>heartbeat</span><span id="band">&mdash;</span></div>
+    <div class="row"><span>locks used</span><span id="locks">&mdash;</span></div>
+    <div class="row"><span>state</span><span id="found">&mdash;</span></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span>current order</span><span id="intent">&mdash;</span></div>
+    <div class="row"><span>decided by</span><span id="source">&mdash;</span></div>
+    <div class="note" id="note"></div>
+    <div class="say" id="say"></div>
+  </div>
+
+  <div class="card note">
+    <strong>A policy is just a prompt.</strong> This page is read-only: every
+    decision is made in the game server, which sends this seat's view and its
+    <code>PLAYER_PROMPT</code> to Claude once every five seconds and executes
+    the returned order with a deterministic 24 Hz controller. Field your own
+    policy by reusing this image with a different <code>PLAYER_PROMPT</code>,
+    or set <code>PLAYER_SCRIPTED=warden</code> / <code>=moth</code> to play a
+    built-in baseline. The full replay, with every order, note and
+    <code>say</code>, ships as a static wasm bundle when the episode ends.
+  </div>
+
+  <div id="status">connecting&hellip;</div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var slot = Number(new URLSearchParams(location.search).get('slot') || 0);
+
+  function set(id, text) {
+    var el = document.getElementById(id);
+    if (el && el.textContent !== text) el.textContent = text;  // data, so text
+  }
+
+  function render(state) {
+    var cog = (state.cogs || []).filter(function (c) { return c.slot === slot; })[0];
+    set('act', 'H' + state.half + ' ' + String(state.act).toUpperCase());
+    set('turn', (state.turn + 1) + ' / ' + state.turns);
+    var left = Math.max(0, Math.round(state.act_left_ticks / 24));
+    set('clock', Math.floor(left / 60) + ':' + ('0' + (left % 60)).slice(-2));
+    if (!cog) {
+      set('role', 'slot ' + slot + ' is not seated in this episode');
+      return;
+    }
+    document.getElementById('alias').style.color =
+      cog.team === 'Moth' ? '#f2c14e' : '#4ecdc4';
+    set('alias', cog.alias);
+    set('role', 'team ' + cog.team + ', ' + cog.role + ' this half');
+    set('pos', cog.pos[0] + ', ' + cog.pos[1]);
+    set('hidden', (cog.hidden_ticks / 24).toFixed(1) + ' s');
+    set('band', cog.role === 'seeker' ? cog.heartbeat : 'n/a (hiders carry no lantern)');
+    set('locks', String(cog.locks_used));
+    set('found', cog.found ? 'FOUND' : (cog.crawl ? 'crawling' : 'active'));
+    set('intent', cog.intent);
+    set('source', cog.source);
+    set('note', cog.note || '');
+    set('say', cog.say ? '"' + cog.say + '"' : '');
+  }
+
+  var scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  var base = location.pathname.replace(/\/clients?\/[^/]*$/, '');
+  var socket = new WebSocket(scheme + '://' + location.host + base + '/global');
+  socket.onopen = function () { set('status', 'live'); };
+  socket.onmessage = function (event) {
+    try { render(JSON.parse(event.data)); } catch (error) { /* ignore */ }
+  };
+  socket.onclose = function () { set('status', 'episode over (socket closed)'); };
+  socket.onerror = function () { set('status', 'socket error'); };
+})();
+</script>
+</body>
+</html>
