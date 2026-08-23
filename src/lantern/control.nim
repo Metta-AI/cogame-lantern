@@ -216,9 +216,13 @@ proc aimTurnFor(sim: Sim, slot, half: int, role: Role, target: Point): int =
   ## 36 / aimTurnRate = 7 ticks, which is less than lockOnTicks, so without
   ## this reflex a sweeping seeker could NEVER hold a hider in the beam long
   ## enough to find one and the whole spot -> found path would be dead. So
-  ## whenever this seeker's own lantern is on a hider RIGHT NOW, the aim
-  ## turns onto it, whatever the order said — except under `hold`, which is
-  ## the explicit "do not move the beam" instruction.
+  ## whenever a hider is lit RIGHT NOW, the aim turns onto it, whatever the
+  ## order said — except under `hold`, which is the explicit "do not move the
+  ## beam" instruction. It keys on the TEAM's lit set, not this seeker's own
+  ## lantern, because the detection streak is itself team-wide
+  ## (`sim.applyTick` step 11 counts a hider as lit if ANY seeker lights it):
+  ## holding a contact is a team job, so all three swing onto the hider the
+  ## moment one of them lights it.
   if cog.order.aim != amHold:
     var litNow = false
     let point = litHiderPoint(sim, slot, half, litNow)
