@@ -22,6 +22,20 @@ suite "determinism":
     check digestsOf(first) == digestsOf(second)
     check first.controls == second.controls
 
+  test "two runs of a FULL-LENGTH match agree at every keyframe":
+    ## The gate the design note asks for is the whole 5040-tick match, not
+    ## the fixture length: everything past tick 1440 - the rest of half 1's
+    ## hunt, the half reset, the second half - is otherwise only ever run
+    ## once per process.
+    let first = testSim(prep = 720, hunt = 1800)
+    discard runScriptedEpisode(first, kindsFor(skWarden, skMoth))
+    let second = testSim(prep = 720, hunt = 1800)
+    discard runScriptedEpisode(second, kindsFor(skWarden, skMoth))
+    check first.tick == 5040
+    check first.keyframes.len == 210
+    check digestsOf(first) == digestsOf(second)
+    check first.controls == second.controls
+
   test "replaying the recorded control bytes reproduces every digest":
     let recorded = recordEpisode()
     let replayed = testSim(prep = 240, hunt = 480)
