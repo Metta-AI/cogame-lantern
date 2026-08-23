@@ -219,6 +219,53 @@ function smokeCanvasBitmapSize() {
   console.log('  board bitmap OK: sized to the viewport at create and on resize');
 }
 
+// The playhead holds on a find burst (400 ms) and on the half-time
+// intermission (2 s). Both flags live in the wasm module's packet buffer for
+// the tick they happen on, and advance() re-reads that packet on every call,
+// including the calls it makes while the hold is still running. Arm the hold
+// from every read and the replay never moves again: the burst re-arms it 24
+// times a second, forever. Softmax.com showed exactly that - every lantern
+// replay froze on its first find, and on half time. Drive the worker's own
+// advance() across the fixture's find with a fake clock and insist the
+// playhead comes out the other side.
+async function smokeHoldReleases(replay) {
+  const { sandbox, posted } = bootWorker();
+  const deadline = Date.now() + 10000;
+  while (!(sandbox.runtimeReady && typeof sandbox.Module._lt_load_replay === 'function')) {
+    if (Date.now() > deadline) fail('hold smoke: runtime never came up');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const Module = sandbox.Module;
+  const bytes = Buffer.from(JSON.stringify(replay), 'utf8');
+  if (!loadBytes(Module, bytes)) fail('hold smoke: module rejected the fixture');
+  const found = replay.events.find((e) => e.type === 'found');
+  if (!found) fail('hold smoke: the fixture has no found event');
+  // Stand in for start(): the core is a sink, the clock is ours.
+  sandbox.meta = { tick_count: replay.tick_count, timelapse_spans: [] };
+  sandbox.core = { ingest: () => {}, getPaceStats: () => ({ draws: 0 }) };
+  sandbox.runtimeLoaded = true;
+  let now = 0;
+  sandbox.Date = { now: () => now };
+  const from = Math.max(0, found.t - 3);
+  Module._lt_seek(from);
+  // 24 fps for 6 wall seconds: a 400 ms hold is ~10 calls, a 2 s one ~48.
+  let reached = -1;
+  for (let call = 0; call < 144; call++) {
+    now += 1000 / 24;
+    sandbox.advance(1);
+    const errorPost = posted.find((m) => m && m.type === 'error');
+    if (errorPost) fail('hold smoke: worker reported ' + errorPost.message);
+    if (Module._lt_tick() >= found.t + 12) { reached = call; break; }
+  }
+  if (reached < 0) {
+    fail('the playhead never released its hold after the find at tick ' +
+      found.t + ': stuck at tick ' + Module._lt_tick() + ' after 6 s. ' +
+      'advance() re-arms holdUntil from a packet it already held on.');
+  }
+  console.log('  find hold OK: released after ' + reached + ' frames, playhead past tick ' +
+    (found.t + 12));
+}
+
 (async function main() {
   smokeCanvasBitmapSize();
   const modulePath = path.join(distDir, 'lantern_replay.js');
@@ -306,6 +353,7 @@ function smokeCanvasBitmapSize() {
 
   await smokeWorkerBootstrap();
   await smokeRuntimeWatchdog();
+  await smokeHoldReleases(replay);
 
   console.log('wasm viewer smoke OK: ' + tickCount + ' ticks, ' +
     meta.events.length + ' events, ' + bursts +

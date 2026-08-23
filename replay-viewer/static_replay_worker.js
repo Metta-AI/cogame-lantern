@@ -37,7 +37,8 @@ var play = {
   loop: false,
   skipLulls: true,      // the build acts run as a timelapse by default
   timelapse: false,
-  holdUntil: 0          // wall-clock ms: the find hold and the intermission
+  holdUntil: 0,         // wall-clock ms: the find hold and the intermission
+  heldTick: -1          // the tick the current hold was armed on
 };
 
 function stageNote() {
@@ -111,9 +112,21 @@ function ingestPacket() {
   packet.skipLulls = play.skipLulls;
   packet.timelapse = play.timelapse;
   packet.tick_count = meta ? meta.tick_count : 0;
-  // A find, and the half-time swap, are worth holding the playhead on.
-  if (packet.bursts && packet.bursts.length) play.holdUntil = Date.now() + 400;
-  if (packet.intermission) play.holdUntil = Date.now() + 2000;
+  // A find, and the half-time swap, are worth holding the playhead on - ONCE
+  // per tick. The flags stay in the module's packet buffer for as long as the
+  // playhead sits on that tick, and advance() re-reads the packet on every
+  // call during the hold; arming from each read would renew the hold 24
+  // times a second and the replay would never move again (it did: every
+  // replay froze on its first find and at half time).
+  var tick = Module._lt_tick();
+  if (tick !== play.heldTick) {
+    if (packet.bursts && packet.bursts.length) {
+      play.holdUntil = Date.now() + 400; play.heldTick = tick;
+    }
+    if (packet.intermission) {
+      play.holdUntil = Date.now() + 2000; play.heldTick = tick;
+    }
+  }
   core.ingest(JSON.stringify(packet));
 }
 
