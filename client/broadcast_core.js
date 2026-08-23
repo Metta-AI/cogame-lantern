@@ -62,18 +62,23 @@
     loadArt();
 
     // ---- cog rigs ----------------------------------------------------------
-    // Paintbot's soldier masters, used exactly as drawn: the canonical
-    // Cogs-vs-Clips cog facing SOUTH, visor visible. As in coworld-ctf's
-    // rig_art.nim the body pivot is the centroid of the SOLID pixels
-    // (alpha >= 200, the shell - not the feathered outline) and the master is
-    // scaled so that solid span stands RigBodyPx tall; the sprite then turns
-    // as one rigid unit so the visor faces the aim.
-    var RigBodyPx = 34;
+    // Nano-banana renders of the Softmax cog (scripts/art/split_cog_sheet.py),
+    // used exactly as drawn: facing SOUTH, visor visible, the Owl carrying a
+    // warden's lantern and the Moth spreading its wing panels. As in
+    // coworld-ctf's rig_art.nim the body pivot is the centroid of the SOLID
+    // pixels (alpha >= 200, the shell - not the feathered outline) and the
+    // master is scaled so that solid span stands RigBodyPx tall; the sprite
+    // then turns as one rigid unit so the visor faces the aim. RigBodyPx is
+    // big enough that the kit reads at board scale (a 128 px sprite drawn at
+    // 34 px was the old rig again); rig.reach is the scaled radius of the
+    // farthest solid pixel from the pivot, so rings and labels clear the kit.
+    var RigBodyPx = 60;
     var RigSolidAlpha = 200;
     var rigs = {};
     function measureRig(bitmap) {
       var w = bitmap.width, h = bitmap.height;
-      var rig = { bitmap: bitmap, px: w / 2, py: h / 2, scale: RigBodyPx / h };
+      var rig = { bitmap: bitmap, px: w / 2, py: h / 2, scale: RigBodyPx / h,
+                  reach: RigBodyPx / 2 };
       if (typeof OffscreenCanvas !== 'function') return rig;
       try {
         var scratch = new OffscreenCanvas(w, h);
@@ -93,6 +98,16 @@
         if (n) {
           rig.px = sx / n; rig.py = sy / n;
           rig.scale = RigBodyPx / Math.max(1, bottom - top + 1);
+          var far = 0;
+          for (var yy = 0; yy < h; yy++) {
+            for (var xx = 0; xx < w; xx++) {
+              if (data[(yy * w + xx) * 4 + 3] >= RigSolidAlpha) {
+                var dx = xx - rig.px, dy = yy - rig.py;
+                if (dx * dx + dy * dy > far) far = dx * dx + dy * dy;
+              }
+            }
+          }
+          rig.reach = Math.sqrt(far) * rig.scale;
         }
       } catch (ignored) { /* keep the geometric centre */ }
       return rig;
@@ -389,13 +404,15 @@
             context.strokeStyle = colour;
             context.lineWidth = 1.5;
             context.beginPath();
-            context.arc(cog.x, cog.y, RigBodyPx / 2 + 2, 0, Math.PI * 2);
+            // the team ring sits outside the kit (wings, lantern) whichever
+            // way the sprite is turned
+            context.arc(cog.x, cog.y, rig.reach + 3, 0, Math.PI * 2);
             context.stroke();
           }
           context.fillStyle = 'rgba(242, 232, 216, ' + (lit ? 0.9 : 0.35) + ')';
           context.font = '11px sans-serif';
           context.textAlign = 'center';
-          context.fillText(cog.alias, cog.x, cog.y - RigBodyPx / 2 - 5);
+          context.fillText(cog.alias, cog.x, cog.y - rig.reach - 6);
           continue;
         }
         context.save();

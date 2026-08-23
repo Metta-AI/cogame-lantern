@@ -3,9 +3,11 @@
 
 Real painted art, not placeholder rectangles: a warehouse floor with poured
 concrete grain and joint lines, wooden crates in their three states (loose,
-locked with visible bolts, broken into splintered planks), and the two cog
-rigs recoloured from paintbot's soldier master to Moth amber and Owl teal,
-with a lantern housing on the seeker rig.
+locked with visible bolts, broken into splintered planks) and the lockerroom
+plate. It no longer owns the cog sprites: client/art/cog_owl_rig.png and
+cog_moth_rig.png are nano-banana renders of the Softmax cog, produced from
+scripts/art/source/cogs_sheet.png by scripts/art/split_cog_sheet.py, and
+this script never writes them.
 
 The output is committed under client/art/ so the bundle stays hermetic — the
 replay viewer downloads nothing but the replay itself.
@@ -157,9 +159,8 @@ def main():
     crate("loose").save(os.path.join(OUT, "crate.png"))
     crate("locked").save(os.path.join(OUT, "crate_locked.png"))
     crate("broken").save(os.path.join(OUT, "crate_broken.png"))
-    # The cogs themselves are paintbot's soldier masters (coworld-ctf
-    # data/soldier_yellow.png -> cog_moth_rig.png, soldier_blue.png ->
-    # cog_owl_rig.png), copied in rather than painted here.
+    # The cogs (cog_owl_rig.png, cog_moth_rig.png) are nano-banana renders
+    # split out by scripts/art/split_cog_sheet.py, never painted here.
     locker_plate()
     print("wrote", ", ".join(sorted(os.listdir(OUT))))
 
