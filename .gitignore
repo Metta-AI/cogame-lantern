@@ -1,0 +1,7 @@
+nim.cfg
+nim.cfg.local
+*.exe
+nimcache/
+replay-viewer/dist/
+dist/
+tests/tmp/

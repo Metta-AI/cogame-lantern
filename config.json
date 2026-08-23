@@ -1,0 +1,17 @@
+{
+  "players": [
+    {"name": "P1"}, {"name": "P2"}, {"name": "P3"},
+    {"name": "P4"}, {"name": "P5"}, {"name": "P6"}
+  ],
+  "tokens": ["token-0", "token-1", "token-2", "token-3", "token-4", "token-5"],
+  "num_agents": 6,
+  "seed": 42,
+  "prepTicks": 720,
+  "huntTicks": 1800,
+  "turnTicks": 120,
+  "halves": 2,
+  "turnBudgetSeconds": 13,
+  "wallClockBudgetSeconds": 660,
+  "playerConnectTimeoutSeconds": 90,
+  "mapPath": "vault"
+}

@@ -1,0 +1,59 @@
+# Builds the static wasm replay viewer with a pinned Nim + emsdk toolchain.
+# Used by tools/build_replay_viewer.sh when no local emcc is available; the
+# output is architecture-neutral WebAssembly.
+#
+# The bundle is HERMETIC: the page fetches nothing but the replay URL it was
+# handed. Every asset it draws with is copied in here.
+FROM emscripten/emsdk:4.0.15 AS replay-viewer-builder
+
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends ca-certificates curl git && \
+  rm -rf /var/lib/apt/lists/* && \
+  curl -fsSL \
+    -o /usr/local/bin/nimby \
+    https://github.com/treeform/nimby/releases/download/0.1.27/nimby-Linux-X64 && \
+  chmod +x /usr/local/bin/nimby && \
+  nimby use 2.2.4
+
+ENV PATH="/root/.nimby/nim/bin:$PATH"
+
+WORKDIR /workspace/lantern
+COPY . .
+# The wasm module uses only the Nim stdlib plus src/lantern, so no package
+# sync is needed. Drop any committed nim.cfg (it pins the author's paths).
+RUN rm -f nim.cfg && \
+  nim c --hints:off -d:emscripten replay-viewer/lantern_replay.nim && \
+  test -s replay-viewer/dist/lantern_replay.wasm && \
+  test -s replay-viewer/dist/lantern_replay.js
+
+# The chrome, the renderer core, the shell, the worker and the art, plus the
+# generated wire constants and the spliced index.html.
+RUN nim r --hints:off --path:src tools/gen_wire_constants.nim \
+      > replay-viewer/dist/wire_constants.js && \
+  cp client/chrome_common.js client/broadcast_core.js replay-viewer/dist/ && \
+  cp replay-viewer/static_replay.js replay-viewer/static_replay_worker.js \
+     replay-viewer/dist/ && \
+  mkdir -p replay-viewer/dist/art && \
+  cp client/art/*.png client/art/*.jpg replay-viewer/dist/art/ && \
+  cp data/font.ttf replay-viewer/dist/font.ttf && \
+  sed -e 's|<!-- WIRE_CONSTANTS -->|<script src="./wire_constants.js"></script>|' \
+      -e 's|<!-- CHROME_COMMON -->|<script src="./chrome_common.js"></script>|' \
+      -e 's|<!-- BROADCAST_CORE -->|<script src="./static_replay.js"></script>|' \
+      client/replay_broadcast.html > replay-viewer/dist/index.html
+
+# The assertion tail: every file the platform's static route will ask for has
+# to exist and be non-trivial, and the coworld-replay readiness bridge has to
+# be in the served JS (SPEC's definition of done greps for it).
+RUN cd replay-viewer/dist && \
+  for f in index.html static_replay.js static_replay_worker.js \
+           chrome_common.js broadcast_core.js wire_constants.js \
+           lantern_replay.js lantern_replay.wasm font.ttf \
+           art/floor.jpg art/crate.png art/crate_locked.png \
+           art/crate_broken.png art/cog_moth.png art/cog_owl.png; do \
+    test -s "$f" || { echo "missing or empty: $f" >&2; exit 1; }; \
+  done && \
+  grep -q 'coworld-replay' static_replay.js && \
+  grep -q "tell('ready')" static_replay.js && \
+  grep -q 'LanternStaticReplay' index.html && \
+  grep -q 'plate-name' index.html && \
+  echo "lantern replay-viewer dist OK"

@@ -1,0 +1,18 @@
+Hide in the open and hunt by sound.
+As a hider: do not build a room - build a screen. Push one crate into the middle of a
+long sightline so it splits the lane, lock it, and then keep that crate between you and
+wherever the beams are. Prefer "hide" targets that sit against the outer wall behind a
+pillar rather than inside an alcove: an alcove is the first place a seeker sweeps and it
+has one exit, while a wall line has two. Always crawl once the hunt begins, and when a
+beam is reported, "flee" perpendicular to its bearing rather than away from it - you
+want to leave the cone, not outrun it. Spend at most two locks; the third crate is worth
+more loose, because a loose crate you can shove again mid-hunt to close a lane behind
+you.
+As a seeker: hunt the noise. Open with "beeline" to the centre of the floor so all three
+lanes are within reach, then let sound and the heartbeat pick your next target - a push
+ring means someone was still building, a footstep ring means someone just moved, and
+both are worth more than an unmotivated sweep. Keep aim "sweep" while travelling and aim
+"track" the instant anything is lit. Split from your team-mates by heartbeat, not by
+map: if two of you read the same band, one should turn away. When the clock is under 20
+seconds and nothing is lit, pry the nearest locked crate - the noise costs nothing at
+that point and a broken crate turns a hiding place into an empty floor.

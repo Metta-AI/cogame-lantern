@@ -1,0 +1,31 @@
+[
+  {
+    "name": "lantern-warren",
+    "run": "/bin/lantern-player",
+    "env": {
+      "PLAYER_PROMPT": "Build a warren, then vanish into it; when you seek, cut the map into thirds and never\nleave one uncleared.\nAs a hider: spend the first two orders pushing, not walking. Pick the nearest loose\ncrate and push it toward the alcove you intend to occupy so the alcove ends up with one\nopening you can watch, then lock exactly that crate with intent \"lock\" - a locked crate\nis the only thing a seeker cannot shove aside. Keep one lock in reserve for the hunt.\nCoordinate by geography, not by chat: take the alcove nearest your spawn and leave the\nothers to your team, so all three of you are not in one room for one beam to sweep. The\nmoment the hunt starts, set crawl true and stop moving: a still cog behind an opaque\ncrate is invisible, and footsteps are the only thing that gives a good hiding place\naway. Use \"flee\" only when a beam is reported within 220 px AND the seeker is not\nalready looking at you; break contact around a crate corner, never down a straight lane.\nAs a seeker: on the first hunt order claim a third of the map by x (left is 0-410,\nmiddle 410-825, right 825-1235) and sweep it with intent \"sweep\", aim \"sweep\", targeting\nthe far corner of your third; do not follow your team-mates. Read the heartbeat every\nturn: cold or cool means your third is empty and you should push deeper, warm means slow\ndown and let the beam do the work, hot or burning means stop advancing and sweep in\nplace. On any lit hider switch to \"chase\" with aim \"track\" and stay on it - half a\nsecond in the beam is a find. Only pry a locked crate when the heartbeat is burning and\nnothing has been lit for two orders."
+    }
+  },
+  {
+    "name": "lantern-owlnight",
+    "run": "/bin/lantern-player",
+    "env": {
+      "PLAYER_PROMPT": "Hide in the open and hunt by sound.\nAs a hider: do not build a room - build a screen. Push one crate into the middle of a\nlong sightline so it splits the lane, lock it, and then keep that crate between you and\nwherever the beams are. Prefer \"hide\" targets that sit against the outer wall behind a\npillar rather than inside an alcove: an alcove is the first place a seeker sweeps and it\nhas one exit, while a wall line has two. Always crawl once the hunt begins, and when a\nbeam is reported, \"flee\" perpendicular to its bearing rather than away from it - you\nwant to leave the cone, not outrun it. Spend at most two locks; the third crate is worth\nmore loose, because a loose crate you can shove again mid-hunt to close a lane behind\nyou.\nAs a seeker: hunt the noise. Open with \"beeline\" to the centre of the floor so all three\nlanes are within reach, then let sound and the heartbeat pick your next target - a push\nring means someone was still building, a footstep ring means someone just moved, and\nboth are worth more than an unmotivated sweep. Keep aim \"sweep\" while travelling and aim\n\"track\" the instant anything is lit. Split from your team-mates by heartbeat, not by\nmap: if two of you read the same band, one should turn away. When the clock is under 20\nseconds and nothing is lit, pry the nearest locked crate - the noise costs nothing at\nthat point and a broken crate turns a hiding place into an empty floor."
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "lantern-warden",
+    "run": "/bin/lantern-player",
+    "env": {
+      "PLAYER_SCRIPTED": "warden"
+    }
+  },
+  {
+    "name": "lantern-moth",
+    "run": "/bin/lantern-player",
+    "env": {
+      "PLAYER_SCRIPTED": "moth"
+    }
+  }
+]
