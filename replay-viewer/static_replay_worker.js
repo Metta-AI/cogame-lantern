@@ -103,6 +103,7 @@ function ingestPacket() {
   packet.timelapse = play.timelapse;
   packet.tick_count = meta ? meta.tick_count : 0;
   // A find, and the half-time swap, are worth holding the playhead on.
+  if (packet.bursts && packet.bursts.length) play.holdUntil = Date.now() + 400;
   if (packet.intermission) play.holdUntil = Date.now() + 2000;
   core.ingest(JSON.stringify(packet));
 }

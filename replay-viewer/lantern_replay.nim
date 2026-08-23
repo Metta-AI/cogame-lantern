@@ -25,6 +25,10 @@ var
   worldMap: MapSpec
   tickCount: int
   mismatchTick = -1
+  bursts: seq[array[2, int]]
+    ## Find flashes since the last packet: where a hider was standing on the
+    ## tick it was found, before the sim teleported it into the caught pen.
+    ## The renderer expands a ring on each one (broadcast_core.drawBursts).
 
 proc bytesFromPointer(data: ptr uint8, length: int): string =
   result = newString(length)
@@ -60,6 +64,10 @@ proc packetJson(): string =
   for ring in world.sounds:
     sounds.add(%*{"kind": $ring.kind, "pos": [ring.at.x, ring.at.y],
                   "radius": ring.radius, "age_ticks": world.tick - ring.tick})
+  var flashes = newJArray()
+  for burst in bursts:
+    flashes.add(%[burst[0], burst[1]])
+  bursts.setLen(0)
   $ %*{
     "type": "frame",
     "tick": world.tick, "half": phase.half, "act": $phase.act,
@@ -68,11 +76,27 @@ proc packetJson(): string =
     "hidden_s": [hidden[0].float / TargetFps.float,
                  hidden[1].float / TargetFps.float],
     "hiders_left": left,
+    "bursts": flashes,
     "intermission": world.tick > 0 and isHalfBoundary(worldConfig, world.tick)
   }
 
 proc rebuildWorld() =
   world = newSim(worldConfig, worldMap)
+  bursts.setLen(0)
+
+proc advanceOne() =
+  ## One tick, remembering where any hider found on it was standing: the sim
+  ## teleports a found hider into the caught pen on the same tick, so the
+  ## position has to be taken before the step.
+  var before: seq[(bool, int, int)]
+  for cog in world.cogs:
+    before.add((cog.found, cog.px, cog.py))
+  world.prepareTick()
+  let base = world.tick * worldConfig.numAgents
+  world.applyTick(controls[base ..< base + worldConfig.numAgents])
+  for slot in 0 ..< world.seats:
+    if world.cogs[slot].found and not before[slot][0]:
+      bursts.add([before[slot][1], before[slot][2]])
 
 proc stepTo(target: int) =
   ## Seeking backwards restarts from tick 0 and fast-forwards: a whole match
@@ -81,9 +105,9 @@ proc stepTo(target: int) =
   if target < world.tick:
     rebuildWorld()
   while world.tick < target and world.tick < tickCount:
-    world.prepareTick()
-    let base = world.tick * worldConfig.numAgents
-    world.applyTick(controls[base ..< base + worldConfig.numAgents])
+    advanceOne()
+  ## A scrub is not a find: only live playback flashes.
+  bursts.setLen(0)
 
 proc ltLoadReplay(data: ptr uint8, length: cint): cint
     {.exportc: "lt_load_replay", cdecl.} =
@@ -147,9 +171,7 @@ proc ltFrame(): cint {.exportc: "lt_frame", cdecl.} =
     if world.tick >= tickCount:
       packet = packetJson()
       return cint(world.tick)
-    world.prepareTick()
-    let base = world.tick * worldConfig.numAgents
-    world.applyTick(controls[base ..< base + worldConfig.numAgents])
+    advanceOne()
     packet = packetJson()
     cint(world.tick)
   except CatchableError as error:

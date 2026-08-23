@@ -8,6 +8,7 @@
 //   * every keyframe digest matched (lt_mismatch_tick() is -1);
 //   * seek-to-mid and seek-to-end land on EXACTLY the requested tick;
 //   * a rewind reproduces the same frame packet as the forward pass;
+//   * one find burst reaches the renderer for every `found` event;
 //   * malformed inputs (bad protocol, bad base64 length, truncated JSON,
 //     tick_count/payload mismatch) are all REJECTED WITH A MESSAGE rather
 //     than crashing the module.
@@ -35,6 +36,19 @@ function readString(module, pointerFn, lengthFn) {
   const pointer = pointerFn();
   return Buffer.from(module.HEAPU8.subarray(pointer, pointer + length))
     .toString('utf8');
+}
+
+function packetOf(module) {
+  return JSON.parse(readString(module, module._lt_packet_ptr,
+    module._lt_packet_len));
+}
+
+function packetWithoutBursts(module) {
+  // `bursts` is the one field that is per-tick-edge rather than per-tick: a
+  // scrub deliberately drops it, so it plays no part in "the rewind matches".
+  const packet = packetOf(module);
+  delete packet.bursts;
+  return JSON.stringify(packet);
 }
 
 function loadBytes(module, bytes) {
@@ -74,27 +88,42 @@ function loadBytes(module, bytes) {
   if (meta.protocol !== 'lantern.replay.v1') fail('bad meta protocol');
   if (!meta.events.length || !meta.results) fail('meta is missing events/results');
 
-  // Advance to the end one tick at a time.
+  // Advance to the end one tick at a time, collecting the find bursts the
+  // renderer draws its expanding ring on.
+  let bursts = 0;
   while (module._lt_tick() < tickCount) {
     if (module._lt_frame() < 0) {
       fail('lt_frame failed: ' +
         readString(module, module._lt_error_ptr, module._lt_error_len));
     }
+    const frame = packetOf(module);
+    for (const burst of frame.bursts || []) {
+      if (!Array.isArray(burst) || burst.length !== 2) {
+        fail('a find burst is not an [x, y] pair: ' + JSON.stringify(burst));
+      }
+      bursts++;
+    }
   }
   if (module._lt_tick() !== tickCount) fail('did not land on the final tick');
-  const endPacket = readString(module, module._lt_packet_ptr, module._lt_packet_len);
+  const endPacket = packetWithoutBursts(module);
+
+  const finds = replay.events.filter((e) => e.type === 'found').length;
+  if (!finds) fail('the smoke fixture has no found event to burst on');
+  if (bursts !== finds) {
+    fail(`find bursts ${bursts} do not match the ${finds} found events`);
+  }
 
   // Seek-to-mid and seek-to-end must land exactly, and a rewind must
   // reproduce the same frame the forward pass produced.
   const mid = Math.floor(tickCount / 2);
   if (module._lt_seek(mid) !== mid) fail('seek to mid did not land exactly');
-  const midPacket = readString(module, module._lt_packet_ptr, module._lt_packet_len);
+  const midPacket = packetWithoutBursts(module);
   if (module._lt_seek(tickCount) !== tickCount) fail('seek to end did not land');
-  if (readString(module, module._lt_packet_ptr, module._lt_packet_len) !== endPacket) {
+  if (packetWithoutBursts(module) !== endPacket) {
     fail('seek to end disagrees with the forward pass');
   }
   if (module._lt_seek(mid) !== mid) fail('rewind to mid did not land');
-  if (readString(module, module._lt_packet_ptr, module._lt_packet_len) !== midPacket) {
+  if (packetWithoutBursts(module) !== midPacket) {
     fail('rewind to mid disagrees with the forward pass');
   }
 
@@ -117,5 +146,6 @@ function loadBytes(module, bytes) {
   }
 
   console.log('wasm viewer smoke OK: ' + tickCount + ' ticks, ' +
-    meta.events.length + ' events, digests all matched');
+    meta.events.length + ' events, ' + bursts +
+    ' find bursts, digests all matched');
 })().catch((error) => fail(error && error.stack || String(error)));
