@@ -138,6 +138,14 @@ proc activeSeats*(sim: Sim, half: int, act: Act): seq[int] =
   ## During a BUILD act only the three hiding seats are queried: the seekers
   ## are locked in the pen, blind and frozen, and are not asked for an order
   ## they could not act on. It also saves three calls per build turn.
+  ##
+  ## Once the hunt act of this half has ended early - every hider found - no
+  ## seat is queried at all. The ticks deliberately keep running so the
+  ## scoring denominator stays whole, but nothing that happens in them can
+  ## change the result, so the turns those seats would have spent on the
+  ## model go back to the wall-clock budget.
+  if act == actHunt and sim.actEnded[half - 1]:
+    return @[]
   for slot in 0 ..< sim.seats:
     let role = roleOfSlot(slot, half)
     if act == actBuild and role == roSeeker:

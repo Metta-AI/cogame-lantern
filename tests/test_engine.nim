@@ -144,6 +144,24 @@ suite "one parallel batch per turn":
       check decision.notes[0].attempt == 1
 
 suite "degrade, never hang":
+  test "once every hider is found, the act stops costing LLM turns":
+    ## all_found leaves the ticks running so the scoring denominator stays
+    ## whole, but there is nothing left to decide: no seat is queried.
+    let sim = testSim()
+    sim.jumpToHunt()
+    check activeSeats(sim, 1, actHunt).len == Seats
+    ## Touch-tag all three hiders on one tick: park each Moth seat on top of
+    ## an Owl seat out on the open floor.
+    let spots = [(150, 110), (617, 110), (1085, 110)]
+    for pair in 0 ..< TeamSize:
+      sim.place(2 * pair, spots[pair][0], spots[pair][1])
+      sim.place(2 * pair + 1, spots[pair][0] + 10, spots[pair][1])
+    sim.prepareTick()
+    sim.applyTick(newSeq[Control](sim.seats))
+    check sim.hidersLeft(1) == 0
+    check sim.actEnded[0]
+    check activeSeats(sim, 1, actHunt).len == 0
+
   test "the budget guard plays scripted and records why":
     let sim = testSim()
     resetRecorder()
