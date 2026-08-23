@@ -236,6 +236,21 @@ Module.onRuntimeInitialized = function () {
 };
 self.Module = Module;
 
+// lantern_replay.js is built with -s MODULARIZE=1 (config.nims), so unlike
+// paintbot's glue it does NOT run on import: it only defines the
+// `LanternReplayModule` factory and waits to be called. Forgetting this call
+// is a silent hang, not an error - onRuntimeInitialized never fires, start()
+// never runs, the replay is never fetched, and the page says "loading
+// replay" forever. tools/wasm_replay_smoke.cjs boots this script the way a
+// Worker does and asserts the runtime actually comes up.
+function bootRuntime() {
+  if (typeof self.LanternReplayModule !== 'function') {
+    reportFailure(new Error('lantern_replay.js did not define LanternReplayModule'));
+    return;
+  }
+  self.LanternReplayModule(Module).catch(reportFailure);
+}
+
 self.onmessage = function (event) {
   var message = event.data || {};
   try {
@@ -271,3 +286,4 @@ self.onmessage = function (event) {
 };
 
 importScripts('./wire_constants.js', './broadcast_core.js', './lantern_replay.js');
+bootRuntime();
