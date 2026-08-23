@@ -69,15 +69,31 @@ function loadBytes(module, bytes) {
 // call it. The original bootstrap never did - the runtime never came up and
 // the page said "loading replay" forever - and this harness, which called the
 // factory itself, stayed green through it.
-async function smokeWorkerBootstrap() {
-  const vm = require('vm');
-  const workerPath = fs.existsSync(path.join(distDir, 'static_replay_worker.js'))
+function workerSource() {
+  return fs.existsSync(path.join(distDir, 'static_replay_worker.js'))
     ? path.join(distDir, 'static_replay_worker.js')
     : path.join(__dirname, '..', 'replay-viewer', 'static_replay_worker.js');
+}
+
+// `stubGlue` replaces lantern_replay.js with a factory that never settles, so
+// the runtime watchdog can be exercised; `fastForward` collapses the long
+// timeouts (the 30 s runtime watchdog) so that test costs milliseconds.
+function bootWorker(options) {
+  const settings = options || {};
+  const vm = require('vm');
+  const workerPath = workerSource();
   const posted = [];
+  const pending = new Set();
   const sandbox = {
     console, TextDecoder, TextEncoder, WebAssembly, URL, JSON, Math, Date,
-    setTimeout, clearTimeout, fetch, AbortController, Promise,
+    fetch, AbortController, Promise,
+    setTimeout: (fn, ms) => {
+      const delay = settings.fastForward && ms > 1000 ? 5 : ms;
+      const handle = setTimeout(() => { pending.delete(handle); fn(); }, delay);
+      pending.add(handle);
+      return handle;
+    },
+    clearTimeout: (handle) => { pending.delete(handle); clearTimeout(handle); },
     // The Node branch of the emscripten glue reads the wasm with fs, keyed
     // off these three; a real Worker would fetch() it instead.
     process, require, __filename: path.join(distDir, 'lantern_replay.js'),
@@ -91,13 +107,26 @@ async function smokeWorkerBootstrap() {
   vm.createContext(sandbox);
   sandbox.importScripts = (...names) => {
     for (const name of names) {
-      const file = path.join(distDir, name.replace(/^\.\//, ''));
+      const leaf = name.replace(/^\.\//, '');
+      if (settings.stubGlue && leaf === 'lantern_replay.js') {
+        vm.runInContext(
+          'self.LanternReplayModule = function () ' +
+          '{ return new Promise(function () {}); };', sandbox,
+          { filename: 'stub-' + leaf });
+        continue;
+      }
+      const file = path.join(distDir, leaf);
       if (!fs.existsSync(file)) fail('worker importScripts: no ' + file);
       vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: file });
     }
   };
   vm.runInContext(fs.readFileSync(workerPath, 'utf8'), sandbox,
     { filename: workerPath });
+  return { sandbox, posted, pending };
+}
+
+async function smokeWorkerBootstrap() {
+  const { sandbox, posted, pending } = bootWorker();
 
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
@@ -105,8 +134,15 @@ async function smokeWorkerBootstrap() {
     if (errorPost) fail('worker bootstrap reported: ' + errorPost.message);
     if (sandbox.runtimeReady === true &&
         typeof sandbox.Module._lt_load_replay === 'function') {
+      // A live watchdog left behind would fire 30 s into a HEALTHY replay and
+      // replace the picture with an error, so the clear is part of the contract.
+      if (pending.size !== 0) {
+        fail('the runtime watchdog was not cleared once the runtime came up (' +
+          pending.size + ' timer(s) still pending)');
+      }
       console.log('  worker bootstrap OK: onRuntimeInitialized fired, ' +
-        'lt_load_replay reachable through the worker\'s Module');
+        'lt_load_replay reachable through the worker\'s Module, ' +
+        'runtime watchdog cleared');
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -116,6 +152,31 @@ async function smokeWorkerBootstrap() {
     'never came up (runtimeReady=' + sandbox.runtimeReady + ', ' +
     'Module._lt_load_replay=' + typeof (sandbox.Module || {})._lt_load_replay +
     '). Is the MODULARIZE=1 factory being called?');
+}
+
+// A runtime that never comes up must SAY SO. Anything that leaves
+// onRuntimeInitialized unfired - a 404 on the .wasm, a factory that rejects
+// nothing and resolves never, a killed compile - is otherwise a silent hang:
+// the theater's spinner spins until the tab dies. The worker bounds it and
+// posts the same {type:'error'} envelope every other failure uses, which the
+// shell turns into data-replay-error plus a coworld-replay `error` message.
+async function smokeRuntimeWatchdog() {
+  const { posted } = bootWorker({ stubGlue: true, fastForward: true });
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const errorPost = posted.find((m) => m && m.type === 'error');
+    if (errorPost) {
+      if (!/did not initialize/.test(errorPost.message || '')) {
+        fail('the runtime watchdog fired with an unexpected message: ' +
+          errorPost.message);
+      }
+      console.log('  runtime watchdog OK: ' + errorPost.message);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  fail('a runtime that never initialises produced NO error: the worker has no ' +
+    'watchdog, so a dead wasm runtime hangs the page on "loading replay"');
 }
 
 (async function main() {
@@ -203,6 +264,7 @@ async function smokeWorkerBootstrap() {
   }
 
   await smokeWorkerBootstrap();
+  await smokeRuntimeWatchdog();
 
   console.log('wasm viewer smoke OK: ' + tickCount + ' ticks, ' +
     meta.events.length + ' events, ' + bursts +
