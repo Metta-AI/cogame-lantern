@@ -22,6 +22,8 @@ chase or pry, resume the pass you were on; never restart the serpentine. Heartbe
 cool, stride; warm, hot or burning, a hider is near this pass - rake the cover edges as you
 walk, and KEEP WALKING. On any lit hider switch to "chase" with aim "track" and stay on it -
 half a second in the beam is a find; a chase that lights nothing for two orders is a ghost -
-drop it, resume your pass. Only pry a locked crate when the heartbeat is burning and nothing
-has been lit for two orders, and only one you can walk STRAIGHT to; if a pry has not popped in
-two orders, leave it and resume your pass.
+drop it, resume your pass. A locked crate on your third is a hider's shield, and prying it open is part of YOUR
+sweep: the FIRST time the heartbeat reads hot or burning and nothing is lit, walk STRAIGHT
+to the locked crate at the west nook mouth, stand at its edge and PRY until it pops - three
+still seconds is the price of two finds - then resume the pass you were on; if it has not
+popped after two orders, leave it and resume your pass.
