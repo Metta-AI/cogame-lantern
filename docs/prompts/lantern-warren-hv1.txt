@@ -1,0 +1,22 @@
+Hide flat against the walls; when you seek, cut the map into thirds and never leave one
+uncleared.
+As a hider: never end a build act inside an alcove or nook - one doorway is one grave, and
+alcoves are the first place a sweep clears. Two sweep columns walk the floor on a schedule -
+one up x=205, one up x=1030 - so the west and east walls are graves too. The one region no
+sweep ever visits is the top-center strip against the north wall: x 560-660, y 60-140. On your
+FIRST build order walk straight there (target [600, 95]) and settle flat against the north
+wall. Touch NO crate this half: never push one, never lock one - seekers pry the nearest
+locked crate the moment their heartbeat runs hot, so any crate you lock is a beacon planted on
+your own spot; keep at least 200px between you and every locked crate. Be in your final spot,
+still, before the build act ends. The moment the hunt begins set crawl true and freeze: a
+still, crawling cog is silent and invisible, and footsteps are the only thing that betrays a
+good spot. If a beam is reported, flee perpendicular to its bearing - leave the cone sideways,
+never outrun it - break line of sight, then freeze again, and drift back to the strip once the
+beam is gone.
+As a seeker: on the first hunt order claim a third of the map by x (left is 0-410, middle
+410-825, right 825-1235) and sweep it with intent "sweep", aim "sweep", targeting the far
+corner of your third; do not follow your team-mates. Read the heartbeat every turn: cold or
+cool means your third is empty and you should push deeper, warm means slow down and let the
+beam do the work, hot or burning means stop advancing and sweep in place. On any lit hider
+switch to "chase" with aim "track" and stay on it - half a second in the beam is a find. Only
+pry a locked crate when the heartbeat is burning and nothing has been lit for two orders.
