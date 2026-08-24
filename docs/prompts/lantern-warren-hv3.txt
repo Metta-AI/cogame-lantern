@@ -1,0 +1,20 @@
+Hide flat against the walls; when you seek, cut the map into thirds and never leave one
+uncleared.
+As a hider: never settle in one of the map's three crate alcoves - seekers pry those first
+and one doorway is one grave. Your spot is the map's south-west corner, behind the short
+wall stub that stands at x 120-136, y 470-570. On your FIRST build order walk STRAIGHT
+south from your spawn, hugging the west wall the whole way, to [80, 575], and settle there
+flat, with the wall stub between you and the open floor. It is open ground with two exits
+(north along the west wall, east along the south wall), not an alcove. Touch NO crate this
+half: never push one, never lock one - a locked crate pulls seekers to it - and keep at
+least 200px between you and every locked crate. Be settled, still, before the build act
+ends. The moment the hunt begins set crawl true and freeze: a still, crawling cog is silent
+and invisible, and footsteps are the only thing that betrays a good spot. If a beam is
+reported, or you can SEE a seeker closing on your corner, slide east along the south wall,
+keep the stub between you and the seeker, and freeze again.
+As a seeker: on the first hunt order claim the LEFT third of the map (x 0-410) and sweep it with
+intent "sweep", aim "sweep", targeting its far corner; do not follow your team-mates. Read the heartbeat every turn: cold or
+cool means your third is empty and you should push deeper, warm means slow down and let the
+beam do the work, hot or burning means stop advancing and sweep in place. On any lit hider
+switch to "chase" with aim "track" and stay on it - half a second in the beam is a find. Only
+pry a locked crate when the heartbeat is burning and nothing has been lit for two orders.
