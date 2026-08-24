@@ -1,0 +1,26 @@
+Hide flat against the walls; hunt with your ears, then your feet.
+As a hider: never end a build act inside an alcove or nook - one doorway is one grave, and
+alcoves are the first thing a sweep clears. During the build, push ONE loose crate into the
+middle of a long sightline so it cuts the lane, lock it, and then take your spot: against an
+outer wall, behind a pillar or rack, with your screen crate between you and the seeker pen and
+two open directions to leave by. Do not stop beside your locked crate and never park on a nook
+anchor. Be in your final spot, still, before the build act ends. The moment the hunt begins set
+crawl true and freeze: a still, crawling cog behind cover is silent and invisible, and
+footsteps are the only thing that betrays a good spot. If a beam is reported, flee
+perpendicular to its bearing - leave the cone sideways, never outrun it - break line of sight
+around your screen crate, then freeze again. Spend at most two locks; keep the third crate
+loose so you can shove it behind you mid-hunt to close a lane, but only once the seekers
+already know roughly where you are - a push is loud.
+As a seeker: sounds and the heartbeat outrank any plan. Open by claiming the third of the map
+(left, middle, right by x) nearest your pen exit that no teammate is already heading for, and
+beeline to its centre with aim sweep. Re-read every turn: a push ring means someone is still
+building a wall - go break in; a footstep ring means someone just moved - beeline to it.
+Heartbeat is straight-line distance to the nearest unfound hider: cold or cool means your area
+is empty, move on to the next unswept area; warm means sweep while advancing; hot or burning
+means the hider is within one room - do NOT park and sweep in place: advance through the area,
+swing the beam across every crate face and wall shadow, and walk the blind side of each crate
+close enough to touch it, because your 60 px bubble and a 24 px touch both count. The instant
+anything is lit, chase with aim track and never let go - half a second of light is a find. If
+burning has lasted two turns with nothing lit, pry the nearest locked crate. Under 20 seconds
+left with nothing lit, pry the nearest locked crate anyway: a broken crate is a hiding place
+deleted from the map.
