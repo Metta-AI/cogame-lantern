@@ -1,20 +1,21 @@
-Build a warren, then vanish into it; when you seek, cut the map into thirds and never
-leave one uncleared.
-As a hider: spend the first two orders pushing, not walking. Pick the nearest loose
-crate and push it toward the alcove you intend to occupy so the alcove ends up with one
-opening you can watch, then lock exactly that crate with intent "lock" - a locked crate
-is the only thing a seeker cannot shove aside. Keep one lock in reserve for the hunt.
-Coordinate by geography, not by chat: take the alcove nearest your spawn and leave the
-others to your team, so all three of you are not in one room for one beam to sweep. The
-moment the hunt starts, set crawl true and stop moving: a still cog behind an opaque
-crate is invisible, and footsteps are the only thing that gives a good hiding place
-away. Use "flee" only when a beam is reported within 220 px AND the seeker is not
-already looking at you; break contact around a crate corner, never down a straight lane.
-As a seeker: on the first hunt order claim a third of the map by x (left is 0-410,
-middle 410-825, right 825-1235) and sweep it with intent "sweep", aim "sweep", targeting
-the far corner of your third; do not follow your team-mates. Read the heartbeat every
-turn: cold or cool means your third is empty and you should push deeper, warm means slow
-down and let the beam do the work, hot or burning means stop advancing and sweep in
-place. On any lit hider switch to "chase" with aim "track" and stay on it - half a
-second in the beam is a find. Only pry a locked crate when the heartbeat is burning and
-nothing has been lit for two orders.
+Hide flat against the walls; when you seek, cut the map into thirds and never leave one
+uncleared.
+As a hider: never end a build act inside an alcove or nook - one doorway is one grave, and
+alcoves are the first place a sweep clears. During the build, push ONE loose crate into the
+middle of a long sightline so it cuts the lane, lock it, and then take your spot: against an
+outer wall, behind a pillar or rack, with your screen crate between you and the seeker pen and
+two open directions to leave by. Do not stop beside your locked crate and never park on a nook
+anchor. Be in your final spot, still, before the build act ends. The moment the hunt begins set
+crawl true and freeze: a still, crawling cog behind cover is silent and invisible, and
+footsteps are the only thing that betrays a good spot. If a beam is reported, flee
+perpendicular to its bearing - leave the cone sideways, never outrun it - break line of sight
+around your screen crate, then freeze again. Spend at most two locks; keep the third crate
+loose so you can shove it behind you mid-hunt to close a lane, but only once the seekers
+already know roughly where you are - a push is loud.
+As a seeker: on the first hunt order claim a third of the map by x (left is 0-410, middle
+410-825, right 825-1235) and sweep it with intent "sweep", aim "sweep", targeting the far
+corner of your third; do not follow your team-mates. Read the heartbeat every turn: cold or
+cool means your third is empty and you should push deeper, warm means slow down and let the
+beam do the work, hot or burning means stop advancing and sweep in place. On any lit hider
+switch to "chase" with aim "track" and stay on it - half a second in the beam is a find. Only
+pry a locked crate when the heartbeat is burning and nothing has been lit for two orders.
