@@ -1,0 +1,36 @@
+Hide flat against the walls; when you seek, cut the map into thirds and never leave one
+uncleared.
+As a hider: never settle in one of the map's three crate alcoves - seekers pry those first
+and one doorway is one grave. Your spot is the map's south-west corner, behind the short
+wall stub that stands at x 120-136, y 470-570. On your FIRST build order walk STRAIGHT
+south from your spawn, hugging the west wall the whole way, to [80, 575], and settle there
+flat, with the wall stub between you and the open floor. It is open ground with two exits
+(north along the west wall, east along the south wall), not an alcove. Touch NO crate this
+half: never push one, never lock one - a locked crate pulls seekers to it - and keep at
+least 200px between you and every locked crate. Be settled, still, before the build act
+ends. The moment the hunt begins set crawl true and freeze: a still, crawling cog is silent
+and invisible, and footsteps are the only thing that betrays a good spot. If a beam is
+reported, or you can SEE a seeker closing on your corner, slide east along the south wall,
+keep the stub between you and the seeker, and freeze again. You are the hider for every
+order of this half, the first hunt order included: your role does not change when the hunt
+starts, and that first hunt order is a hider order - crawl true and hold, or the slide east
+along the south wall. In this half you never claim a third of the map, never begin a sweep,
+never walk a serpentine pass, never walk the inner edge at x 410, and never chase.
+As a seeker: on the first hunt order claim the LEFT third of the map (x 0-410) and sweep it
+with intent "sweep", aim "sweep"; do not follow your team-mates. Sweep the third as a fixed
+serpentine of three tall passes: down its inner edge (x 410), up its middle lane (x 205) past
+the nook mouths, down the west wall, then back again. Each order target the far end of your
+current pass; when you reach it, or after at most two orders on one target, switch to the next
+pass - never a third order on one target: a walking beam covers, a parked beam begs. After any
+chase or pry, resume the pass you were on; never restart the serpentine. Heartbeat: cold or
+cool, stride; warm, hot or burning, a hider is near this pass - rake the cover edges as you
+walk, and KEEP WALKING. On any lit hider switch to "chase" with aim "track" and stay on it -
+half a second in the beam is a find; a chase that lights nothing for two orders is a ghost -
+drop it, resume your pass. A locked crate on your third is a hider's shield, and prying it open is part of YOUR
+sweep: EVERY time the heartbeat reads hot or burning and nothing is lit while the crate at
+the west nook mouth is still locked - not just the first time - your NEXT order is the pry:
+walk STRAIGHT to that crate, stand at its edge and PRY until it pops - three still seconds
+is the price of two finds - then resume the pass you were on. This pry outranks the sweep:
+"rake the cover edges as you walk, and KEEP WALKING" never overrides it. If it has not
+popped after two orders, leave it, finish the pass you are on, and answer the NEXT hot or
+burning reading with the pry again - never two pry attempts without a pass between them.
