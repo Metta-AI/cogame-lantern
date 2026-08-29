@@ -36,7 +36,7 @@ window.ChromeCommon = function (ctx) {
   function otherTeam(team) { return team === 'Moth' ? 'Owl' : 'Moth'; }
 
   var WIRE = window.LANTERN_WIRE || {};
-  var SPEEDS = WIRE.speeds || [1, 2, 3, 4, 8, 16];
+  var SPEEDS = WIRE.speeds || [0.5, 1, 2, 3, 4, 8, 16];
   var FPS = WIRE.fps || 24;
 
   // Chrome-level toggles read their initial value from the page URL, so

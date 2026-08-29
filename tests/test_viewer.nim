@@ -102,6 +102,25 @@ suite "the static replay shell":
     check "FETCH_TIMEOUT_MS" in worker
     check "Retry" in shell
 
+  test "the fleet-wide 1/2x speed is on every copy of the speeds list":
+    ## The speed chips send the 1-BASED INDEX into the speeds list down the
+    ## command channel, so all three copies must agree: the generated wire
+    ## constants, the chrome's raw file:// fallback and the worker's own
+    ## literal.
+    check "speeds: [0.5, " in readRepoFile("tools/gen_wire_constants.nim")
+    check "[0.5, 1, 2, 3, 4, 8, 16]" in chrome
+    check "[0.5, 1, 2, 3, 4, 8, 16]" in worker
+    ## The fractional pace lives in the worker's tick carry; the old
+    ## max(1, round(frames * speed)) floored 0.5x straight back to 1x.
+    check "play.carry" in worker
+    check "Math.max(1," notin worker
+
+  test "Space pauses playback on the shipped page, end to end":
+    ## index.html is client/replay_broadcast.html spliced: its window keydown
+    ## sends ' ' down the command channel, and the worker toggles pause.
+    check "' ': ' '" in page
+    check "if (text === ' ') play.paused = !play.paused" in worker
+
   test "chrome_common exposes the factory the page instantiates":
     check "window.ChromeCommon = function (ctx)" in chrome
     check "renderTransport" in chrome

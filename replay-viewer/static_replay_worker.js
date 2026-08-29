@@ -19,7 +19,10 @@ var FETCH_TIMEOUT_MS = 20000;
 // page sits on "loading replay" until the tab dies. Bound it, and report the
 // same error envelope every other failure uses so the shell shows an error.
 var RUNTIME_TIMEOUT_MS = 30000;
-var SPEEDS = [1, 2, 3, 4, 8, 16];
+// Must agree with wire_constants.js / chrome_common.js: the chips send the
+// 1-based INDEX into this list. 0.5 is the replay-only half speed, paced by
+// the fractional tick carry in advance().
+var SPEEDS = [0.5, 1, 2, 3, 4, 8, 16];
 
 var Module = {};
 var runtimeReady = false;
@@ -38,7 +41,9 @@ var play = {
   skipLulls: true,      // the build acts run as a timelapse by default
   timelapse: false,
   holdUntil: 0,         // wall-clock ms: the find hold and the intermission
-  heldTick: -1          // the tick the current hold was armed on
+  heldTick: -1,         // the tick the current hold was armed on
+  carry: 0              // fractional ticks banked between advance() calls,
+                        // so the 0.5x speed spends one tick every OTHER frame
 };
 
 function stageNote() {
@@ -216,9 +221,16 @@ function advance(frames) {
     var tick = Module._lt_tick();
     play.timelapse = inTimelapse(tick);
     var multiplier = play.speed * (play.timelapse ? 4 : 1);
-    var count = play.paused || now < play.holdUntil
-      ? 0
-      : Math.max(1, Math.min(64, Math.round((Number(frames) || 1) * multiplier)));
+    // Fractional speeds (the 0.5x chip) bank their remainder in play.carry:
+    // at 0.5x each 1-frame advance scores 0.5, so a tick is spent every
+    // other call. Integer speeds keep an integer total (carry stays 0) and
+    // behave exactly as the old max(1, round(frames * speed)) did.
+    var count = 0;
+    if (!play.paused && now >= play.holdUntil) {
+      var scaled = (Number(frames) || 1) * multiplier + play.carry;
+      count = Math.min(64, Math.floor(scaled));
+      play.carry = scaled - Math.floor(scaled);
+    }
     for (var i = 0; i < count; i++) {
       if (Module._lt_tick() >= meta.tick_count) {
         if (!play.loop) { play.paused = true; break; }
