@@ -72,6 +72,8 @@ suite "the results schema":
 suite "the platform contract":
   test "the replay viewer is the static bundle, never a pod":
     check game["replay_viewer"]["bundle"].getStr() == "static-replay-viewer"
+    ## The public replay copy is gzip; the Worker sniffs and inflates it.
+    check game["replay_viewer"]["replay_compression"].getStr() == "gzip"
 
   test "episode_timeout_minutes is 20, and TOP-LEVEL where the schema puts it":
     ## CoworldGameManifest has additionalProperties: false, so this key under

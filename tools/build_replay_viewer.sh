@@ -73,7 +73,10 @@ cp "${dist}"/art/* "${output_dir}/art/"
 test -f "${output_dir}/index.html"
 grep -q 'coworld-replay' "${output_dir}/static_replay.js"
 grep -q "tell('ready')" "${output_dir}/static_replay.js"
+grep -q "tell('phase'" "${output_dir}/static_replay.js"
 grep -q 'data-replay-loaded' "${output_dir}/static_replay.js"
+grep -q 'replay_fetch_end' "${output_dir}/static_replay_worker.js"
+grep -q 'DecompressionStream' "${output_dir}/static_replay_worker.js"
 
 # The node harness runs the real wasm module against a recorded replay and
 # asserts the tick total and the final digest. It is skipped only when node is
