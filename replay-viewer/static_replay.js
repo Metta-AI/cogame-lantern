@@ -151,11 +151,9 @@
           if (config.onText) config.onText(message.text);
           if (!readyTold) {
             readyTold = true;
-            // Report ready one PAINTED frame later, so `ready` means a
-            // picture and not merely a parsed payload.
-            window.requestAnimationFrame(function () {
-              window.requestAnimationFrame(function () { tell('ready'); });
-            });
+            // Yield once after the first drawn frame. Animation frames may be
+            // throttled indefinitely in lazy offscreen iframes.
+            window.setTimeout(function () { tell('ready'); }, 0);
           }
         } else if (message.type === 'phase') {
           tell('phase', null, message);

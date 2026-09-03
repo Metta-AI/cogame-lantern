@@ -101,7 +101,7 @@ function copyIntoRuntime(bytes, callback) {
 // The platform stores the PUBLIC replay copy as gzip bytes when the manifest
 // declares replay_compression (no Content-Encoding, unchanged URL), and the
 // wasm module has no inflate of its own, so the Worker inflates here. The
-// format is sniffed from the CONTENT (0x1f 0x8b gzip, 0x78 zlib), never from
+// format is sniffed from the CONTENT, never from
 // the URL suffix or a response header.
 async function inflate(bytes, format) {
   var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
@@ -192,7 +192,8 @@ async function fetchReplay(url) {
     var bytes = new Uint8Array(await response.arrayBuffer());
     if (!bytes.length) throw new Error('Replay response was empty');
     var gzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
-    var zlib = bytes[0] === 0x78;
+    var zlib = bytes.length >= 2 && (bytes[0] & 0x0f) === 8 &&
+      (bytes[0] >> 4) <= 7 && (((bytes[0] << 8) | bytes[1]) % 31) === 0;
     postMessage({ type: 'phase', phase: 'replay_fetch_end',
                   bytes: bytes.byteLength, compressed: gzip || zlib });
     if (gzip) bytes = await inflate(bytes, 'gzip');
