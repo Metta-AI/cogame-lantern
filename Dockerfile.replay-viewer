@@ -54,6 +54,9 @@ RUN cd replay-viewer/dist && \
   done && \
   grep -q 'coworld-replay' static_replay.js && \
   grep -q "tell('ready')" static_replay.js && \
+  grep -q "tell('phase'" static_replay.js && \
+  grep -q 'replay_fetch_end' static_replay_worker.js && \
+  grep -q 'DecompressionStream' static_replay_worker.js && \
   grep -q 'LanternStaticReplay' index.html && \
   grep -q 'plate-name' index.html && \
   echo "lantern replay-viewer dist OK"

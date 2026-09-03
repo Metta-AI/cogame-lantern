@@ -98,6 +98,16 @@ function copyIntoRuntime(bytes, callback) {
   }
 }
 
+// The platform stores the PUBLIC replay copy as gzip bytes when the manifest
+// declares replay_compression (no Content-Encoding, unchanged URL), and the
+// wasm module has no inflate of its own, so the Worker inflates here. The
+// format is sniffed from the CONTENT, never from
+// the URL suffix or a response header.
+async function inflate(bytes, format) {
+  var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
 function inTimelapse(tick) {
   if (!play.skipLulls || !meta || !meta.timelapse_spans) return false;
   for (var i = 0; i < meta.timelapse_spans.length; i++) {
@@ -173,6 +183,7 @@ async function fetchReplay(url) {
   var timer = setTimeout(function () { if (controller) controller.abort(); },
                          FETCH_TIMEOUT_MS);
   try {
+    postMessage({ type: 'phase', phase: 'replay_fetch_start' });
     var response = await fetch(url, {
       credentials: 'omit', mode: 'cors',
       signal: controller ? controller.signal : undefined
@@ -180,6 +191,13 @@ async function fetchReplay(url) {
     if (!response.ok) throw new Error('Replay request returned HTTP ' + response.status);
     var bytes = new Uint8Array(await response.arrayBuffer());
     if (!bytes.length) throw new Error('Replay response was empty');
+    var gzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+    var zlib = bytes.length >= 2 && (bytes[0] & 0x0f) === 8 &&
+      (bytes[0] >> 4) <= 7 && (((bytes[0] << 8) | bytes[1]) % 31) === 0;
+    postMessage({ type: 'phase', phase: 'replay_fetch_end',
+                  bytes: bytes.byteLength, compressed: gzip || zlib });
+    if (gzip) bytes = await inflate(bytes, 'gzip');
+    else if (zlib) bytes = await inflate(bytes, 'deflate');
     return bytes;
   } catch (error) {
     if (error && error.name === 'AbortError') {
@@ -204,6 +222,7 @@ async function start() {
     });
     if (!loaded) throw new Error(runtimeError());
     runtimeLoaded = true;
+    postMessage({ type: 'phase', phase: 'replay_parsed' });
     var metaText = readString(Module._lt_meta_ptr, Module._lt_meta_len);
     meta = JSON.parse(metaText);
     core.ingest(metaText);
@@ -285,6 +304,7 @@ var runtimeTimer = setTimeout(function () {
 Module.onRuntimeInitialized = function () {
   runtimeReady = true;
   clearTimeout(runtimeTimer);
+  postMessage({ type: 'phase', phase: 'bundle_ready' });
   start();
 };
 self.Module = Module;

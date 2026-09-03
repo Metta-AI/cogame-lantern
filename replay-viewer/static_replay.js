@@ -15,10 +15,14 @@
   // before the wasm module has compiled and the replay has come back from S3.
   // So the shell tells the parent what it is doing: `loading` as soon as this
   // script runs, `ready` once the renderer has drawn its first frame, `error`
-  // when the replay cannot be shown.
-  function tell(type, message) {
+  // when the replay cannot be shown, and in between the `phase` marks the
+  // Worker reports (bundle_ready, replay_fetch_start, replay_fetch_end with
+  // the byte count and the gzip/zlib sniff, replay_parsed). A Worker cannot
+  // reach window.parent, so the marks are relayed from here; the host stamps
+  // them with its own clock on receipt, so they carry no timestamp.
+  function tell(type, message, fields) {
     if (window.parent === window) return;
-    var envelope = { src: 'coworld-replay', type: type };
+    var envelope = Object.assign({ src: 'coworld-replay', type: type }, fields);
     if (message) envelope.message = message;
     try { window.parent.postMessage(envelope, '*'); } catch (ignore) {}
   }
@@ -147,12 +151,12 @@
           if (config.onText) config.onText(message.text);
           if (!readyTold) {
             readyTold = true;
-            // Report ready one PAINTED frame later, so `ready` means a
-            // picture and not merely a parsed payload.
-            window.requestAnimationFrame(function () {
-              window.requestAnimationFrame(function () { tell('ready'); });
-            });
+            // Yield once after the first drawn frame. Animation frames may be
+            // throttled indefinitely in lazy offscreen iframes.
+            window.setTimeout(function () { tell('ready'); }, 0);
           }
+        } else if (message.type === 'phase') {
+          tell('phase', null, message);
         } else if (message.type === 'meta') {
           if (config.onMeta) config.onMeta(message.text);
         } else if (message.type === 'status') {
@@ -183,7 +187,11 @@
     function start() {
       if (started || !offscreen || failed) return;
       started = true;
-      var replayUrl = new URLSearchParams(location.search).get('replay');
+      // `#replay=` first (the fragment is not sent in the HTTP request, so
+      // the hosted index.html cache key does not vary per episode), then the
+      // legacy `?replay=` query that local viewers still open with.
+      var replayUrl = new URLSearchParams(location.hash.slice(1)).get('replay') ||
+        new URLSearchParams(location.search).get('replay');
       if (!replayUrl) {
         showFailure(new Error('Missing required replay URL'));
         return;

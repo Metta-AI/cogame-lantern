@@ -294,7 +294,9 @@ PROTOCOL_GLOBAL_TEXT = (
     "validating itself against the recorded keyframe digests and surfacing any "
     "divergence as data-replay-mismatch-tick. The bundle fetches nothing but "
     "the replay URL it was handed and posts {src:\"coworld-replay\",type:"
-    "\"loading\"|\"ready\"|\"error\"} to its embedding page. The game server "
+    "\"loading\"|\"phase\"|\"ready\"|\"error\"} to its embedding page. The "
+    "public replay copy is stored gzip (replay_compression) and the Worker "
+    "inflates it by content sniff. The game server "
     "also serves /client/replay off the identical dist for local viewing, and "
     "/replay-data in replay mode. The replay bytes themselves are strict UTF-8 "
     "JSON with protocol \"lantern.replay.v1\": config, the map inlined "
@@ -314,7 +316,11 @@ manifest = {
              "zero-sum", "tool-use"],
     "game": {
         "name": "lantern",
-        "replay_viewer": {"bundle": "static-replay-viewer"},
+        # replay_compression: the platform stores the PUBLIC browser copy of
+        # each replay as gzip bytes (no Content-Encoding, same URL); the
+        # Worker sniffs the gzip magic and inflates before the wasm loader.
+        "replay_viewer": {"bundle": "static-replay-viewer",
+                          "replay_compression": "gzip"},
         "description": DESCRIPTION,
         "owner": "daveey@softmax.com",
         "runnable": {

@@ -66,6 +66,20 @@ suite "the static replay shell":
     check "tell('error'" in shell
     check "window.parent.postMessage(envelope" in shell
 
+  test "the phase marks and the gzip sniff are in the served JS":
+    ## The Worker posts `phase` marks (bundle_ready, replay_fetch_start,
+    ## replay_fetch_end with bytes + compressed, replay_parsed) and the shell
+    ## relays them to the embedder; the host stamps them on its own clock.
+    ## The public replay copy is gzip (manifest replay_compression), so the
+    ## Worker sniffs the magic bytes and inflates before the wasm loader.
+    check "tell('phase'" in shell
+    check "location.hash" in shell
+    for token in ["bundle_ready", "replay_fetch_start", "replay_fetch_end",
+                  "replay_parsed", "0x1f", "0x8b", "(bytes[0] & 0x0f)", "% 31",
+                  "DecompressionStream(format)", "_lt_load_replay"]:
+      check token in worker
+    check worker.find("replay_fetch_end") < worker.find("await inflate(")
+
   test "the inherited worker-shell contract is intact":
     for token in ["createCore", "data-replay-loaded", "data-replay-mismatch-tick",
                   "showFailure", "transferControlToOffscreen", "attachMinimap",
