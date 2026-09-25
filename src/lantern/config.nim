@@ -33,9 +33,7 @@ proc defaultGameConfig*(): GameConfig =
     showPlayerLabels: true,
     gameOverTicks: 96,
     episodeTimeoutMs: 1_200_000,
-    shutdownGraceMs: 20_000,
-    model: "claude-sonnet-5",
-    maxOutputTokens: 900
+    shutdownGraceMs: 20_000
   )
 
 proc millisOf(node: JsonNode): int =
@@ -98,11 +96,8 @@ proc update*(config: var GameConfig, configJson: string) =
   config.maxLocksPerHider =
     intField(node, "maxLocksPerHider", config.maxLocksPerHider)
   config.gameOverTicks = intField(node, "gameOverTicks", config.gameOverTicks)
-  config.maxOutputTokens = intField(node, "maxOutputTokens", config.maxOutputTokens)
   if node.hasKey("mapPath"):
     config.mapPath = node["mapPath"].getStr()
-  if node.hasKey("model"):
-    config.model = node["model"].getStr()
   if node.hasKey("showPlayerLabels"):
     config.showPlayerLabels = node["showPlayerLabels"].getBool()
   if node.hasKey("turnBudgetSeconds"):

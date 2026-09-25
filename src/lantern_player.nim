@@ -1,10 +1,6 @@
-## Lantern player: a policy is just a prompt.
+## Lantern scripted, prompt, and Jev policies over private seat views.
 ##
-## The whole container does two things. It sends ONE register frame carrying
-## its prompt (or its baseline name), and then it receives until the game
-## says done. Every decision is made in the game server, which composes this
-## seat's view plus this seat's prompt and asks Claude for one order every
-## five seconds.
+## The game retains order validation, control, results, and replay.
 ##
 ## PLAYER_SCRIPTED=warden (or 1/true/yes) registers the seat as the built-in
 ## warden baseline instead; PLAYER_SCRIPTED=moth as the weaker moth baseline.
@@ -16,6 +12,7 @@
 
 import std/[json, options, os, strutils]
 import whisky
+import lantern/[jev_policy, llm]
 
 const
   DefaultPrompt = """
@@ -42,12 +39,15 @@ when isMainModule:
     quit(1)
   var prompt = getEnv("PLAYER_PROMPT")
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
-  if prompt.strip().len == 0 and scripted.len == 0:
+  let jev = getEnv("PLAYER_JEV") == "1"
+  if prompt.strip().len == 0 and scripted.len == 0 and not jev:
     prompt = DefaultPrompt
+  let kind = if jev: "jev" elif scripted.len > 0: "scripted" else: "prompt"
   let label = getEnv("PLAYER_POLICY_LABEL").strip()
+  let client = if kind == "prompt": newLlmClient() else: nil
 
   proc registerFrame(): string =
-    $ %*{"type": "register", "prompt": prompt,
+    $ %*{"type": "register", "kind": kind,
          "scripted": (if scripted.len == 0: newJNull() else: %scripted),
          "policy": label}
 
@@ -71,9 +71,7 @@ when isMainModule:
     quit(0)
 
   socket.send(registerFrame())
-  echo "lantern player: registered (",
-    (if scripted.len > 0: "scripted " & scripted
-     else: $prompt.len & " prompt chars"), ")"
+  echo "lantern player: registered (", kind, ")"
 
   while true:
     let received = socket.receiveMessage()
@@ -97,8 +95,26 @@ when isMainModule:
         socket.send(registerFrame())
       of "turn":
         discard
+      of "decision":
+        let timeoutSeconds = max(1, payload["timeout_ms"].getInt() div 1000)
+        var reply = %*{
+          "type": "action",
+          "protocol": "lantern.player.v2",
+          "id": payload["id"],
+          "source": "llm"
+        }
+        if (kind == "prompt" and client.disabled) or
+            (jev and not jevConfigured()):
+          reply["source"] = %"fallback"
+          reply["cause"] = %"no_credentials"
+        elif jev:
+          reply["order"] = chooseJevOrder(payload, timeoutSeconds)
+        else:
+          reply["order"] = client.call(payload["view"], prompt,
+            payload["attempt"].getInt() > 1, timeoutSeconds)
+        socket.send($reply)
       else:
         discard
     except CatchableError as error:
-      echo "lantern player: ignoring bad frame: ", error.msg
+      echo "lantern player: frame or policy failed: ", error.msg
   socket.close()

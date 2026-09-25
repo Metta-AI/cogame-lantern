@@ -9,24 +9,20 @@
 ##   WS  /player?slot=N&token=T   - the player protocol
 ##   WS  /global                  - the spectator snapshot stream
 ##
-## Player protocol (lantern.player.v1), all JSON text frames:
-##   player -> game: {"type":"register","prompt":...,"scripted":...,"policy":...}
+## Player protocol (lantern.player.v2), all JSON text frames:
+##   player -> game: {"type":"register","kind":...,"scripted":...,"policy":...}
 ##   game -> player: {"type":"welcome",...}
+##                   {"type":"decision","view":...}
+##   player -> game: {"type":"action","order":...}
 ##                   {"type":"turn","turn":N,"tick":T,"half":H,"act":...,
 ##                    "role":...,"view":{...},"order_source":...}
 ##                   {"done":true,"result":{...}}
-##
-## Decisions are made HERE, not in the player container: the Bedrock sidecar
-## credentials and the `anthropic_api_key` coworld secret are injected into
-## the GAME pod, phase 60 greps the GAME log for `falling back`, and "one
-## parallel batch per turn" is a game-server property. The player container is
-## therefore thin: connect, register, receive until done.
 
-import std/[json, locks, os, sets, strutils, tables, times]
+import std/[json, locks, monotimes, os, sets, strutils, tables, times]
 import bitworld/runtime
 import curly
 import mummy, mummy/routers
-import types, arena, sim, rules, control, orders, llm,
+import types, arena, sim, rules, control, orders, decision,
        render, replay, roster, broadcast, events, labels
 
 const
@@ -46,6 +42,7 @@ type
     roster: Roster
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
+    actionReplies: Table[int, string]
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
@@ -130,6 +127,44 @@ proc pushTurnFrames(gs: GameState, sources: Table[int, string]) =
       "view": seatView(gs.sim, slot),
       "order_source": sources.getOrDefault(slot, "scripted")})
 
+proc exchangeDecisions(requests: seq[JsonNode], timeoutMs: int):
+    seq[string] {.gcsafe.} =
+  ## Every private view leaves before the shared deadline starts.
+  result = newSeq[string](requests.len)
+  var sockets = newSeq[WebSocket](requests.len)
+  var connected = newSeq[bool](requests.len)
+  {.gcsafe.}:
+    withLock stateLock:
+      for position, request in requests:
+        let slot = request["slot"].getInt()
+        if state.playerSockets.hasKey(slot):
+          sockets[position] = state.playerSockets[slot]
+          connected[position] = true
+          state.actionReplies.del(slot)
+    for position, socket in sockets:
+      if connected[position]:
+        socket.send($requests[position])
+    let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+    while getMonoTime() < deadline:
+      var pending = false
+      withLock stateLock:
+        for position, request in requests:
+          if not connected[position] or result[position].len > 0:
+            continue
+          let slot = request["slot"].getInt()
+          if state.actionReplies.hasKey(slot):
+            let raw = state.actionReplies[slot]
+            state.actionReplies.del(slot)
+            if parseJson(raw){"id"}.getInt() == request["id"].getInt():
+              result[position] = raw
+            else:
+              pending = true
+          else:
+            pending = true
+      if not pending:
+        break
+      sleep(10)
+
 # ---------------------------------------------------------------------------
 # The turn loop.
 # ---------------------------------------------------------------------------
@@ -192,7 +227,6 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       except CatchableError as error:
         echo "lantern: could not report the player failure: ", error.msg
 
-    let client = newLlmClient(config)
     var reason = erComplete
     var rule = edFullTime
     var guardEngaged = false
@@ -216,7 +250,6 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         var half = 1
         var act = actBuild
         var seats: seq[int]
-        var prompts: seq[string]
         var scripted: seq[ScriptKind]
         var isTurn = false
         withLock stateLock:
@@ -228,7 +261,6 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           simRef = state.sim
           if isTurn:
             seats = activeSeats(state.sim, half, act)
-            prompts = state.roster.prompts()
             scripted = state.roster.scriptKinds()
             var hidden: seq[int]
             for team in [tmMoth, tmOwl]:
@@ -256,8 +288,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
           let decisions =
             if seats.len == 0: @[]
-            else: client.decideAll(simRef, half, seats, prompts, scripted,
-                                   guardEngaged)
+            else: decideAll(simRef, half, seats, scripted,
+                            guardEngaged, exchangeDecisions)
           var sources: Table[int, string]
           withLock stateLock:
             let phase = phaseAt(config, state.sim.tick)
@@ -502,7 +534,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
       echo "lantern: player slot ", slot, " connected (",
         state.playerSockets.len, "/", state.config.numAgents, ")"
       websocket.send($ %*{
-        "type": "welcome", "protocol": "lantern.player.v1", "slot": slot,
+        "type": "welcome", "protocol": "lantern.player.v2", "slot": slot,
         "alias": aliasOfSlot(slot), "team": $teamOfSlot(slot),
         "hides_in_half": hidHalfOfSlot(slot),
         "turns": totalTurns(state.config)})
@@ -551,8 +583,12 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           withLock stateLock:
             state.roster.applyRegister(slot, payload)
             echo "lantern: slot ", slot, " registered (",
-              policyKind(state.roster.seats[slot]), ", ",
-              state.roster.seats[slot].prompt.len, " prompt chars)"
+              policyKind(state.roster.seats[slot]), ")"
+        elif payload{"type"}.getStr() == "action":
+          let actionId = payload{"id"}
+          if not actionId.isNil and actionId.kind == JInt:
+            withLock stateLock:
+              state.actionReplies[slot] = message.data
       except CatchableError as error:
         echo "lantern: ignoring bad player frame: ", error.msg
     of ErrorEvent:
@@ -564,6 +600,7 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           state.socketSlots.del(websocket)
           if state.playerSockets.getOrDefault(slot) == websocket:
             state.playerSockets.del(slot)
+            state.actionReplies.del(slot)
           if slot >= 0 and slot < state.roster.seats.len:
             state.roster.seats[slot].connected = false
         state.globalSockets.excl(websocket)
@@ -602,6 +639,7 @@ proc prepareState*(config: GameConfig) =
   state.config = config
   state.sim = newSim(config, loadMapSpec(config.mapPath))
   state.roster = initRoster(config)
+  state.actionReplies = initTable[int, string]()
   state.llmTurns = newSeq[int](config.numAgents)
   state.fallbackTurns = newSeq[int](config.numAgents)
   state.fallbackCauses = newSeq[array[FallbackCause, int]](config.numAgents)
@@ -627,6 +665,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.config = config
   state.sim = newSim(config, loadMapSpec(config.mapPath))
   state.roster = initRoster(config)
+  state.actionReplies = initTable[int, string]()
   state.llmTurns = newSeq[int](config.numAgents)
   state.fallbackTurns = newSeq[int](config.numAgents)
   state.fallbackCauses = newSeq[array[FallbackCause, int]](config.numAgents)

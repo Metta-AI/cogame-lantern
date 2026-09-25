@@ -27,8 +27,11 @@ suite "seats":
     check cert["game_config"]["seed"].getInt() == 42
     check cert["game_config"]["prepTicks"].getInt() +
       cert["game_config"]["huntTicks"].getInt() == 720          ## 1440 ticks
+    var seated: HashSet[string]
     for player in cert["players"]:
-      check player["player_id"].getStr() == "baseline"
+      seated.incl(player["player_id"].getStr())
+    for player in manifest["player"]:
+      check player["id"].getStr() in seated
 
   test "the slot pins agree with lantern's fixed parity":
     for variant in manifest["variants"]:
@@ -73,6 +76,13 @@ suite "the platform contract":
   test "the replay viewer is the static bundle, never a pod":
     check game["replay_viewer"]["bundle"].getStr() == "static-replay-viewer"
 
+  test "model credentials and selection belong to players":
+    check not game["runnable"].hasKey("env")
+    check not game["config_schema"]["properties"].hasKey("model")
+    check not game["config_schema"]["properties"].hasKey("maxOutputTokens")
+    check manifest["player"][1]["env"].hasKey("PLAYER_PROMPT")
+    check manifest["player"][2]["env"]["PLAYER_JEV"].getStr() == "1"
+
   test "episode_timeout_minutes is 20, and TOP-LEVEL where the schema puts it":
     ## CoworldGameManifest has additionalProperties: false, so this key under
     ## `game` is not merely ignored - it rejects the whole manifest at
@@ -106,6 +116,11 @@ suite "the platform contract":
       check page["content"]["type"].getStr() == "text"
       check page["content"]["value"].getStr().len > 500
     check ids == @["rules.md", "protocol.md"]
+    check docs["readme"]["value"].getStr() == readRepoFile("README.md")
+    check docs["pages"][1]["content"]["value"].getStr() ==
+      readRepoFile("docs/PROTOCOL.md")
+    check game["protocols"]["player"]["value"].getStr() ==
+      readRepoFile("docs/PROTOCOL.md")
 
   test "the image placeholders and entrypoints line up with compose.yaml":
     ## `coworld build` derives the placeholder from the COMPOSE SERVICE NAME

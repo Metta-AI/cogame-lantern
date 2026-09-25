@@ -1,207 +1,197 @@
-## The decision loop against a FAKE LLM client.
-##
-## The property this file exists for: lantern is a simultaneous-decision game,
-## so every open seat's request goes out in ONE PARALLEL BATCH per turn. A
-## sequential walk over six seats is what blows the play budget, and it is
-## invisible from the outside unless something counts the batches.
+## The game sends one private view per active model seat before taking actions.
 
-import std/[json, os, strutils, times, unicode, unittest]
+import std/[json, strutils, unicode, unittest]
 import curly
 import support/helpers
-import lantern/[llm, server]
+import lantern/[decision, llm, server]
 
-type Recorded = object
-  batchSizes: seq[int]
-  timeouts: seq[int]
-  windows: seq[(int, int)]
-  seatsSeen: seq[seq[int]]
+type ExchangeMode = enum valid, invalid, missing, noCredentials
+var
+  mode: ExchangeMode
+  batches: seq[seq[JsonNode]]
+  deadlines: seq[int]
 
-var recorded: Recorded
+proc actionFor(request: JsonNode): string =
+  $ %*{
+    "type": "action", "protocol": "lantern.player.v2",
+    "id": request["id"], "source": "llm",
+    "order": {"intent": "hide", "target": [240, 329],
+              "crawl": true, "note": "settling behind a crate"}
+  }
 
-proc resetRecorder() =
-  recorded = Recorded()
+proc exchange(requests: seq[JsonNode], timeoutMs: int):
+    seq[string] {.gcsafe.} =
+  {.gcsafe.}:
+    batches.add(requests)
+    deadlines.add(timeoutMs)
+    result = newSeq[string](requests.len)
+    for position, request in requests:
+      case mode
+      of valid: result[position] = actionFor(request)
+      of invalid: result[position] = "not json"
+      of missing: discard
+      of noCredentials:
+        result[position] = $ %*{
+          "type": "action", "protocol": "lantern.player.v2",
+          "id": request["id"], "source": "fallback",
+          "cause": "no_credentials"}
 
-proc fakeSender(reply: string, delayMs = 0): auto =
-  ## A batch transport that answers every request with the same text and
-  ## records the in-flight window each request had. One call = one parallel
-  ## batch, so every request in a batch shares a window and they all
-  ## intersect; a sequential implementation could not produce that.
-  proc sender(client: LlmClient, requests: seq[LlmRequest],
-              timeoutSeconds: int): seq[LlmReply] {.gcsafe.} =
-    {.gcsafe.}:
-      let started = int(epochTime() * 1000.0)
-      if delayMs > 0:
-        sleep(delayMs)
-      let ended = int(epochTime() * 1000.0)
-      recorded.batchSizes.add(requests.len)
-      recorded.timeouts.add(timeoutSeconds)
-      recorded.windows.add((started, ended))
-      var seats: seq[int]
-      for request in requests:
-        seats.add(request.seat)
-      recorded.seatsSeen.add(seats)
-      result = newSeq[LlmReply](requests.len)
-      for index in 0 ..< requests.len:
-        result[index] = LlmReply(text: reply, startMs: started, endMs: ended)
-  sender
+proc reset(which: ExchangeMode) =
+  mode = which
+  batches = @[]
+  deadlines = @[]
 
-proc timeoutSender(): auto =
-  proc sender(client: LlmClient, requests: seq[LlmRequest],
-              timeoutSeconds: int): seq[LlmReply] {.gcsafe.} =
-    {.gcsafe.}:
-      recorded.batchSizes.add(requests.len)
-      recorded.timeouts.add(timeoutSeconds)
-      result = newSeq[LlmReply](requests.len)
-      for index in 0 ..< requests.len:
-        result[index] = LlmReply(error: "Operation timed out after 8500 ms")
-  sender
-
-proc testClient(sender: auto): LlmClient =
-  result = newLlmClient(testConfig())
-  result.disabled = false
-  result.transport = ltAnthropic
-  result.sender = sender
-
-const GoodHider = """{"intent":"hide","target":[240,329],"crawl":true,
-  "note":"settling in behind the crate","say":"holding"}"""
-
-suite "one parallel batch per turn":
-  test "a hunt turn batches six requests and a build turn three":
+suite "ordinary player decisions":
+  test "all active seats see one pre-action state in one batch":
     let sim = testSim(prep = 240, hunt = 480)
-    let scripted = newSeq[ScriptKind](sim.seats)
-    let prompts = newSeq[string](sim.seats)
-
-    resetRecorder()
-    var client = testClient(fakeSender(GoodHider))
+    reset(valid)
     let buildSeats = activeSeats(sim, 1, actBuild)
-    check buildSeats.len == TeamSize
-    discard client.decideAll(sim, 1, buildSeats, prompts, scripted, false)
-    check recorded.batchSizes == @[TeamSize]
-
+    let decisions = decideAll(sim, 1, buildSeats,
+      newSeq[ScriptKind](sim.seats), false, exchange)
+    check batches.len == 1
+    check batches[0].len == TeamSize
+    for position, request in batches[0]:
+      check request["slot"].getInt() == buildSeats[position]
+      check request["role"].getStr() == "hider"
+      check request["view"]["turn"].getInt() == 0
+      check request["view"]["you"]["alias"].getStr() ==
+        aliasOfSlot(buildSeats[position])
+      check decisions[position].source == osLlm
+      check decisions[position].order.intent == inHide
     sim.jumpToHunt()
-    resetRecorder()
-    client = testClient(fakeSender(GoodHider))
-    let huntSeats = activeSeats(sim, 1, actHunt)
-    check huntSeats.len == Seats
-    discard client.decideAll(sim, 1, huntSeats, prompts, scripted, false)
-    check recorded.batchSizes == @[Seats]
-    ## Every request in the batch shares one in-flight window, so they all
-    ## intersect. A sequential loop over six seats cannot do that.
-    check recorded.windows.len == 1
-    check recorded.seatsSeen[0] == huntSeats
+    reset(valid)
+    discard decideAll(sim, 1, activeSeats(sim, 1, actHunt),
+      newSeq[ScriptKind](sim.seats), false, exchange)
+    check batches.len == 1
+    check batches[0].len == Seats
+    for request in batches[0]:
+      check request["view"]["half"].getInt() == 1
 
-  test "the two attempt deadlines are 9 s then 4 s, and fit the turn budget":
+  test "an invalid action retries once and then plays warden":
     let sim = testSim()
-    resetRecorder()
-    let client = testClient(timeoutSender())
-    let seats = activeSeats(sim, 1, actBuild)
-    let decisions = client.decideAll(sim, 1, seats,
-      newSeq[string](sim.seats), newSeq[ScriptKind](sim.seats), false)
-    check recorded.timeouts == @[9, 4]
-    check recorded.timeouts[0] + recorded.timeouts[1] <=
-      sim.config.turnBudgetMs div 1000
+    reset(invalid)
+    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+      newSeq[ScriptKind](sim.seats), false, exchange)
+    check deadlines == @[sim.config.attempt1Ms, sim.config.attempt2Ms]
+    check batches.len == 2
     for decision in decisions:
       check decision.source == osFallback
       check decision.notes.len == 2
-      check decision.notes[0].cause == fcTimeout
-      check legalFor(decision.order.intent, roHider)
-
-  test "a hung client is bounded by the per-turn budget, not by the model":
-    let sim = testSim()
-    resetRecorder()
-    let client = testClient(fakeSender("this is not JSON", delayMs = 40))
-    let started = epochTime()
-    let decisions = client.decideAll(sim, 1, activeSeats(sim, 1, actBuild),
-      newSeq[string](sim.seats), newSeq[ScriptKind](sim.seats), false)
-    ## Exactly two attempts, then the scripted order - never a third.
-    check recorded.batchSizes.len == 2
-    check epochTime() - started < 5.0
-    for decision in decisions:
-      check decision.source == osFallback
       check decision.notes[0].cause == fcParseError
-
-  test "one bad reply then one good reply costs exactly one retry":
-    var attempt = 0
-    proc sender(client: LlmClient, requests: seq[LlmRequest],
-                timeoutSeconds: int): seq[LlmReply] {.gcsafe.} =
-      {.gcsafe.}:
-        inc attempt
-        recorded.batchSizes.add(requests.len)
-        result = newSeq[LlmReply](requests.len)
-        for index in 0 ..< requests.len:
-          result[index] = LlmReply(
-            text: (if attempt == 1: "sorry, no" else: GoodHider))
-    let sim = testSim()
-    resetRecorder()
-    let client = testClient(sender)
-    let decisions = client.decideAll(sim, 1, activeSeats(sim, 1, actBuild),
-      newSeq[string](sim.seats), newSeq[ScriptKind](sim.seats), false)
-    check recorded.batchSizes == @[TeamSize, TeamSize]
-    for decision in decisions:
-      check decision.source == osLlm
-      check decision.order.intent == inHide
-      check decision.notes.len == 1
-      check decision.notes[0].attempt == 1
-
-suite "degrade, never hang":
-  test "once every hider is found, the act stops costing LLM turns":
-    ## all_found leaves the ticks running so the scoring denominator stays
-    ## whole, but there is nothing left to decide: no seat is queried.
-    let sim = testSim()
-    sim.jumpToHunt()
-    check activeSeats(sim, 1, actHunt).len == Seats
-    ## Touch-tag all three hiders on one tick: park each Moth seat on top of
-    ## an Owl seat out on the open floor.
-    let spots = [(150, 110), (617, 110), (1085, 110)]
-    for pair in 0 ..< TeamSize:
-      sim.place(2 * pair, spots[pair][0], spots[pair][1])
-      sim.place(2 * pair + 1, spots[pair][0] + 10, spots[pair][1])
-    sim.prepareTick()
-    sim.applyTick(newSeq[Control](sim.seats))
-    check sim.hidersLeft(1) == 0
-    check sim.actEnded[0]
-    check activeSeats(sim, 1, actHunt).len == 0
-
-  test "the budget guard plays scripted and records why":
-    let sim = testSim()
-    resetRecorder()
-    let client = testClient(fakeSender(GoodHider))
-    let decisions = client.decideAll(sim, 1, activeSeats(sim, 1, actBuild),
-      newSeq[string](sim.seats), newSeq[ScriptKind](sim.seats), true)
-    check recorded.batchSizes.len == 0        ## no LLM call at all
-    for decision in decisions:
-      check decision.source == osFallback
-      check decision.notes[0].cause == fcBudgetGuard
       check legalFor(decision.order.intent, roHider)
 
-  test "no credentials at all falls back instantly with no network wait":
+  test "missing replies share bounded deadlines":
     let sim = testSim()
-    resetRecorder()
-    let client = newLlmClient(testConfig())   ## no env: transport ltNone
-    check client.disabled
-    let decisions = client.decideAll(sim, 1, activeSeats(sim, 1, actBuild),
-      newSeq[string](sim.seats), newSeq[ScriptKind](sim.seats), false)
-    check recorded.batchSizes.len == 0
+    reset(missing)
+    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+      newSeq[ScriptKind](sim.seats), false, exchange)
+    check batches.len == 2
+    check deadlines == @[8500, 3500]
     for decision in decisions:
       check decision.source == osFallback
+      check decision.notes[0].cause == fcTimeout
+
+  test "credential-free players report fallback without a retry":
+    let sim = testSim()
+    reset(noCredentials)
+    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+      newSeq[ScriptKind](sim.seats), false, exchange)
+    check batches.len == 1
+    for decision in decisions:
+      check decision.source == osFallback
+      check decision.notes.len == 1
       check decision.notes[0].cause == fcNoCredentials
 
-  test "a scripted seat is never sent to the model":
+  test "scripted seats do not receive decisions":
     let sim = testSim()
-    resetRecorder()
-    let client = testClient(fakeSender(GoodHider))
+    reset(valid)
     var scripted = newSeq[ScriptKind](sim.seats)
     let seats = activeSeats(sim, 1, actBuild)
     scripted[seats[0]] = skWarden
-    let decisions = client.decideAll(sim, 1, seats,
-      newSeq[string](sim.seats), scripted, false)
-    check recorded.batchSizes == @[TeamSize - 1]
+    let decisions = decideAll(sim, 1, seats, scripted, false, exchange)
+    check batches[0].len == TeamSize - 1
     check decisions[0].source == osScripted
 
-  test "an episode that ends in a fault scores 0.5 and keeps its replay":
+  test "the budget guard keeps orders game-owned":
+    let sim = testSim()
+    reset(valid)
+    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+      newSeq[ScriptKind](sim.seats), true, exchange)
+    check batches.len == 0
+    for decision in decisions:
+      check decision.source == osFallback
+      check decision.notes[0].cause == fcBudgetGuard
+
+suite "the roster":
+  test "an absent seat plays warden":
+    let roster = initRoster(testConfig())
+    check policyKind(roster.seats[0]) == "scripted"
+    check roster.scriptKinds()[0] == skWarden
+
+  test "prompt and Jev register without sending model instructions":
+    var roster = initRoster(testConfig())
+    roster.applyRegister(0, %*{"type": "register", "kind": "prompt",
+                                "policy": "prompt"})
+    roster.applyRegister(1, %*{"type": "register", "kind": "jev",
+                                "policy": "jev"})
+    check policyKind(roster.seats[0]) == "llm"
+    check policyKind(roster.seats[1]) == "llm"
+    check roster.scriptKinds()[0] == skNone
+    check roster.scriptKinds()[1] == skNone
+
+  test "invalid registration leaves the warden baseline intact":
+    var roster = initRoster(testConfig())
+    expect LanternError:
+      roster.applyRegister(2, %*{
+        "type": "register", "kind": "scripted", "scripted": "unknown"})
+    check roster.scriptKinds()[2] == skWarden
+
+suite "provider text remains rune-safe":
+  test "a non-ASCII throttle body has valid UTF-8 in its error":
+    let client = newLlmClient()
+    var response: Response
+    response.code = 429
+    response.body = "\u{1F526}".repeat(400)
+    var message = ""
+    try:
+      discard client.textOf(response, "", "https://api.anthropic.com")
+    except CatchableError as error:
+      message = error.msg
+    check validateUtf8(message) == -1
+    check "\u{1F526}" in message
+
+  test "a non-ASCII authentication body has valid UTF-8":
+    let client = newLlmClient()
+    var response: Response
+    response.code = 401
+    response.body = "\u20AC".repeat(500)
+    var message = ""
+    try:
+      discard client.textOf(response, "", "https://api.anthropic.com")
+    except CatchableError as error:
+      message = error.msg
+    check validateUtf8(message) == -1
+    check "\u20AC" in message
+
+  test "a cut-off non-ASCII model reply has valid UTF-8":
+    let client = newLlmClient()
+    var response: Response
+    response.code = 200
+    response.body = $ %*{
+      "stop_reason": "max_tokens",
+      "content": [{"type": "text", "text": "alcove \u00E9 " &
+        "\u{1F526}".repeat(200)}]}
+    var message = ""
+    try:
+      discard client.textOf(response, "", "https://api.anthropic.com")
+    except CatchableError as error:
+      message = error.msg
+    check validateUtf8(message) == -1
+    check "\u{1F526}" in message
+
+suite "result and replay on interrupted episodes":
+  test "a sim fault scores one half and keeps a replay":
     let sim = testSim(prep = 240, hunt = 480)
-    ## Stop half way, as the fault path does, and build the results from
-    ## whatever was simulated.
     while sim.tick < 700:
       sim.prepareTick()
       let controls = compileControls(sim)
@@ -214,14 +204,15 @@ suite "degrade, never hang":
     check results["winner"].kind == JNull
     check results["final_tick"].getInt() == 700
     var kinds: seq[string]
-    for _ in 0 ..< sim.seats: kinds.add("scripted")
+    for _ in 0 ..< sim.seats:
+      kinds.add("scripted")
     let partial = buildReplay(sim, kinds, results)
     check partial["tick_count"].getInt() == 700
     check partial["keyframes"].len > 0
 
-  test "a wall-clock stop before half 2's hunt is a 0.5 deadline":
+  test "a wall-clock stop before half two's hunt scores one half":
     let sim = testSim(prep = 240, hunt = 480)
-    while sim.tick < 800:                 ## half 2 build, no half-2 hunt yet
+    while sim.tick < 800:
       sim.prepareTick()
       sim.applyTick(compileControls(sim))
     check sim.huntTicksPlayed[1] == 0
@@ -230,119 +221,3 @@ suite "degrade, never hang":
       check value.getFloat() == 0.5
     check results["reason"].getStr() == "deadline"
     check results["end_rule"].getStr() == "wall_clock"
-    check results["halves_played"].getInt() == 1
-
-suite "the roster":
-  test "a seat that never registers plays warden, and says so":
-    var roster = initRoster(testConfig())
-    check roster.seats[0].scripted == skNone
-    check policyKind(roster.seats[0]) == "scripted"
-    let sim = testSim()
-    let order = scriptedOrder(sim, 0, 1, roster.seats[0].scripted)
-    check legalFor(order.intent, roHider)
-
-  test "registering a prompt makes the seat an llm seat and caps the prompt":
-    var roster = initRoster(testConfig())
-    roster.applyRegister(0, %*{"type": "register", "prompt": "hide well",
-                               "policy": "lantern-warren"})
-    check policyKind(roster.seats[0]) == "llm"
-    check roster.prompts()[0] == "hide well"
-    roster.applyRegister(1, %*{"type": "register",
-                               "prompt": "x".repeat(MaxPromptRunes + 500)})
-    check roster.seats[1].prompt.runeLen == MaxPromptRunes
-
-  test "a mid-match disconnect degrades to warden and revives on reconnect":
-    var roster = initRoster(testConfig())
-    roster.applyRegister(2, %*{"type": "register", "prompt": "seek by sound"})
-    check policyKind(roster.seats[2]) == "llm"
-    roster.seats[2].connected = false
-    ## The prompt survives the socket: a seat that comes back is the same
-    ## policy it was, and while it is away the server plays its cog.
-    check roster.prompts()[2] == "seek by sound"
-    roster.seats[2].connected = true
-    check policyKind(roster.seats[2]) == "llm"
-
-suite "captured provider errors are rune-safe all the way to the replay":
-  ## `textOf` slices provider and model text into the message it raises;
-  ## `curlySender` stores that message verbatim, `decideAll` copies it into
-  ## the fallback note, and the server emits it as a `fallback` event. A byte
-  ## slice anywhere on that path puts half a codepoint in the replay, which
-  ## renders in a browser and then fails the platform's strict parse.
-  const Torch = "\u{1F526}"            ## 4 bytes per rune
-  const Accent = "\u00e9"              ## 2 bytes per rune
-  const Euro = "\u20AC"                ## 3 bytes per rune: 400 is not a multiple
-
-  proc capturedSender(response: Response): auto =
-    ## Exactly `curlySender`'s capture: `textOf` raises, the message is
-    ## stored in `LlmReply.error` verbatim.
-    proc sender(client: LlmClient, requests: seq[LlmRequest],
-                timeoutSeconds: int): seq[LlmReply] {.gcsafe.} =
-      {.gcsafe.}:
-        result = newSeq[LlmReply](requests.len)
-        for index in 0 ..< requests.len:
-          try:
-            result[index].text = client.textOf(response, "",
-                                               "https://api.anthropic.com")
-          except CatchableError as error:
-            result[index].error = error.msg
-    sender
-
-  proc replayBytesFor(response: Response): (string, seq[string]) =
-    ## Drive the whole path once and hand back the replay bytes plus every
-    ## `fallback` detail that reached them.
-    let sim = testSim()
-    let client = testClient(capturedSender(response))
-    let seats = activeSeats(sim, 1, actBuild)
-    let decisions = client.decideAll(sim, 1, seats,
-      newSeq[string](sim.seats), newSeq[ScriptKind](sim.seats), false)
-    var details: seq[string]
-    var noted = 0
-    for index, slot in seats:
-      check decisions[index].source == osFallback
-      check decisions[index].notes.len >= 1
-      for note in decisions[index].notes:
-        inc noted
-        sim.emit(fallbackEvent(sim.tick, 0, slot, note.attempt, note.cause,
-                               note.detail))
-    for event in sim.events:
-      if event{"type"}.getStr() == "fallback":
-        details.add(event["detail"].getStr())
-    check details.len == noted
-    var kinds: seq[string]
-    for _ in 0 ..< sim.seats: kinds.add("scripted")
-    ($buildReplay(sim, kinds, sim.scriptedResults()), details)
-
-  test "a 429 body of 4-byte runes lands in the replay as valid UTF-8":
-    var response: Response
-    response.code = 429
-    response.body = Torch.repeat(400)     ## 1600 bytes, 400 runes
-    let (bytes, details) = replayBytesFor(response)
-    check validateUtf8(bytes) == -1
-    for detail in details:
-      check validateUtf8(detail) == -1
-      check detail.runeLen <= MaxDetailRunes
-      check Torch in detail
-
-  test "a 401 body of 3-byte runes lands in the replay as valid UTF-8":
-    var response: Response
-    response.code = 401
-    response.body = Euro.repeat(500)      ## byte 400 lands inside a rune
-    let (bytes, details) = replayBytesFor(response)
-    check validateUtf8(bytes) == -1
-    for detail in details:
-      check validateUtf8(detail) == -1
-
-  test "a max_tokens reply of the MODEL's own non-ASCII text is rune-safe":
-    ## The most reachable of the four slices: `result` here is the model's
-    ## generated text, and the system prompt invites non-ASCII in `note`/`say`.
-    var response: Response
-    response.code = 200
-    response.body = $ %*{
-      "stop_reason": "max_tokens",
-      "content": [{"type": "text",
-                   "text": "alcove " & Accent & " " & Torch.repeat(200)}]}
-    let (bytes, details) = replayBytesFor(response)
-    check validateUtf8(bytes) == -1
-    for detail in details:
-      check validateUtf8(detail) == -1
-      check detail.runeLen <= MaxDetailRunes

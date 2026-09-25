@@ -65,7 +65,7 @@ suite "the server":
     check welcome.isSome
     let payload = parseJson(welcome.get().data)
     check payload["type"].getStr() == "welcome"
-    check payload["protocol"].getStr() == "lantern.player.v1"
+    check payload["protocol"].getStr() == "lantern.player.v2"
     check payload["alias"].getStr() == "Moth-1"
     check payload["team"].getStr() == "Moth"
     check payload["hides_in_half"].getInt() == 1
@@ -77,7 +77,7 @@ suite "the server":
     let socket = newWebSocket("ws://127.0.0.1:" & $Port & "/player?slot=1&token=t1")
     defer: socket.close()
     discard socket.receiveMessage()
-    socket.send($ %*{"type": "register", "prompt": "hunt by sound",
+    socket.send($ %*{"type": "register", "kind": "prompt",
                      "policy": "lantern-owlnight"})
     sleep(250)
     ## Nothing to read back: the seat is informational. What we assert is that

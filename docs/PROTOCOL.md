@@ -3,33 +3,40 @@
 Three surfaces: the **player** websocket (what a policy container speaks), the
 **global** spectator stream, and the **replay** bytes. All JSON, all UTF-8.
 
-## Player protocol — `lantern.player.v1`
+## Player protocol — `lantern.player.v2`
 
 JSON text frames over the websocket named by `COWORLD_PLAYER_WS_URL` (the
 platform already appends `?slot=N&token=T`). A bad slot or token gets a **403**
 and a second connection on a live slot gets a **409**.
 
-A lantern policy is a prompt, and decisions are made in the GAME server, so the
-player container has exactly one job. On connect it sends **one** frame:
+On connect the player declares a policy kind. Model prompts and credentials
+remain inside that player:
 
 ```json
 {"type": "register",
- "prompt": "<strategy text, or empty>",
+ "kind": "scripted" | "prompt" | "jev",
  "scripted": "warden" | "moth" | null,
  "policy": "<free label, <= 48 runes>"}
 ```
 
-`PLAYER_SCRIPTED` parsing: `warden` / `1` / `true` / `yes` → the warden
-baseline, `moth` → the moth baseline, anything else → none. A seat that
-registers with neither field, or never registers at all, plays `warden`.
-An over-long `prompt` is truncated at 4000 runes, never rejected.
+`PLAYER_SCRIPTED` parsing: `warden` / `1` / `true` / `yes` selects the warden
+baseline; `moth` selects moth. A seat that never registers plays `warden`.
+The player caps its own prompt at 4000 runes.
 
-The server answers `welcome`, then one `turn` frame per decision turn, then the
-final frame:
+The server answers `welcome`. At each active model turn it sends one private
+decision request and waits for an action. After applying orders it sends an
+informational `turn` frame. The final frame carries results:
 
 ```json
-{"type": "welcome", "protocol": "lantern.player.v1", "slot": 0,
+{"type": "welcome", "protocol": "lantern.player.v2", "slot": 0,
  "alias": "Moth-1", "team": "Moth", "hides_in_half": 1, "turns": 42}
+
+{"type": "decision", "protocol": "lantern.player.v2", "id": 20401,
+ "slot": 0, "role": "hider", "attempt": 1, "timeout_ms": 8500,
+ "view": { …private seat view… }}
+
+{"type": "action", "protocol": "lantern.player.v2", "id": 20401,
+ "source": "llm", "order": { …ordinary order… }}
 
 {"type": "turn", "turn": 17, "tick": 2040, "half": 1, "act": "hunt",
  "role": "hider", "view": { … }, "order_source": "llm"}
@@ -37,9 +44,10 @@ final frame:
 {"done": true, "result": { …the results document… }}
 ```
 
-The `turn` frame is **informational**: the seat is not required to answer, and
-nothing it sends after `register` is read. It exists so a policy author can see
-exactly what its prompt was shown.
+The `turn` frame is informational. Scripted seats receive no decision request.
+With no model credential, a model player replies with `source: "fallback"`
+and `cause: "no_credentials"`. The game applies its warden baseline and
+records the cause.
 
 ## The per-seat view
 
@@ -119,9 +127,9 @@ two policy kinds are strictly comparable.
 | `note` | ≤ 140 **runes** | truncated on a rune boundary |
 | `say` | ≤ 32 **runes** | truncated on a rune boundary |
 
-Three further caps on strings that reach the replay: `register.policy` ≤ 48
-runes, `fallback.detail` ≤ 200 runes, `register.prompt` ≤ 4000 runes at the
-transport. **Truncation is on rune boundaries, never bytes** — a byte-truncated
+Two further caps on strings that reach the replay: `register.policy` ≤ 48
+runes and `fallback.detail` ≤ 200 runes. **Truncation is on rune boundaries,
+never bytes** — a byte-truncated
 multi-byte character renders in a browser and then fails a strict JSON parser.
 
 Parsing is tolerant: markdown fences are stripped, the outermost balanced
@@ -132,11 +140,10 @@ fails does the seat get the `warden` order plus a `fallback` event.
 
 ## Decisions and timing
 
-All open seats' requests go out as **ONE PARALLEL BATCH** per turn
-(`curly.makeRequests`) — never a sequential walk. A hunt turn batches six
-requests, a build turn three. Per turn, per seat: attempt 1 gets 8.5 s, the one
-retry gets 3.5 s with a "your previous reply was invalid" hint, and then the
-scripted order. At the start of each turn, if two more full turn budgets would
+The game sends all active model seats' private views before waiting for any
+reply. A hunt turn can ask six seats; a build turn asks three. Per turn, per
+seat: attempt 1 gets 8.5 s, the one retry gets 3.5 s, then the scripted
+order. At the start of each turn, if two more full turn budgets would
 not fit inside `wallClockBudgetSeconds`, the **budget guard** engages and every
 remaining turn plays scripted, so the episode ends `complete/full_time` rather
 than `deadline`.

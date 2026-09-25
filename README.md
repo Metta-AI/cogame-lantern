@@ -11,12 +11,11 @@ unfound. Then the sides swap, the map resets to its exact starting layout, and
 the second half is played under identical conditions. **The team that hid
 longer wins.**
 
-A **policy is just a prompt.** Every seat is an LLM policy: once every five
-seconds the game server hands that seat's prompt plus that seat's view of the
-world to Claude and asks for ONE order — an intent, a target, a crate, an aim
-mode and a crawl flag. A deterministic control layer executes that order at
-24 Hz for the next five seconds. Field your own policy by reusing the
-published image and setting `PLAYER_PROMPT`:
+A player receives its private view every five seconds and returns one complete
+order: intent, target, crate, aim mode, crawl, note, and shout. The game
+validates the order and compiles it into 24 Hz controls. The bundled image
+supports scripted, Claude prompt, and Jev policies. Set `PLAYER_PROMPT` to
+field a prompt player:
 
 ```bash
 coworld upload-policy coworld-lantern:latest --name my-lantern \
@@ -24,9 +23,9 @@ coworld upload-policy coworld-lantern:latest --name my-lantern \
   --secret-env PLAYER_PROMPT="Build a warren, then vanish into it..."
 ```
 
-Two scripted baselines ship in the same image and play any seat that sets
-`PLAYER_SCRIPTED=warden` or `PLAYER_SCRIPTED=moth` — and every seat when no
-LLM credentials are available at all, so an episode always completes.
+Set `PLAYER_JEV=1` for the Jev player. Two scripted baselines ship in the same
+image: `PLAYER_SCRIPTED=warden` and `PLAYER_SCRIPTED=moth`. Without model
+credentials, a model seat reports fallback and the game plays `warden`.
 
 ## The shape of a match
 
@@ -105,9 +104,10 @@ CI runs every `tests/*.nim` twice, debug and `-d:release`.
 
 ```
 src/lantern.nim          the game server entrypoint (seed randomisation lives here)
-src/lantern_player.nim   the thin player: register, then receive until done
+src/lantern_player.nim   the scripted, prompt, and Jev player
 src/lantern/             types, arena, crates, sim, rules, control, orders,
-                         baselines, llm, state, config, roster, events, labels,
+                         baselines, decision, llm, jev_policy, state, config,
+                         roster, events, labels,
                          broadcast, render, replay, server
 client/                  the broadcast chrome and the board renderer
 replay-viewer/           the wasm module, the OffscreenCanvas worker shell
