@@ -39,14 +39,17 @@ runs on the replay it fetched from S3.
   A missing or invalid config exits 2 with one clean line and no traceback:
   `tests/test_startup.nim` asserts the shape, because a traceback looks like a
   crashed game to the platform.
-- `src/lantern_player.nim` — the whole player container. It registers once and
-  then only receives. It exits **0** when it cannot dial the game: the server
+- `src/lantern_player.nim` — the whole player container. It registers once,
+  receives private decisions, and returns ordinary orders. It exits **0**
+  when it cannot dial the game: the server
   plays an absent seat with the warden baseline, and a non-zero exit here
   would fail an episode the game already handles.
 - `src/lantern/` — the modules, in dependency order: `types` → `labels`,
   `config`, `roster`, `events`, `state`, `arena` → `crates` → `rules` → `sim`
-  → `control` → `orders` → `baselines` → `render` → `llm` → `replay`,
+  → `control` → `orders` → `baselines` → `render` → `decision` → `replay`,
   `broadcast` → `server`.
+- `src/lantern/{llm,jev_policy}.nim` — model calls and candidate ranking used
+  only by the player executable.
 - `client/` — the broadcast chrome (`replay_broadcast.html`, forked from
   paintbot with its CSS block and every markup id carried across),
   `chrome_common.js` and `broadcast_core.js` (the board renderer).
@@ -120,10 +123,9 @@ work" for either.
 - **`num_agents` must appear in every manifest variant AND the certification
   fixture.** Missing from one variant, the ladder schedules zero episodes and
   nothing says why.
-- **The LLM batch is ONE `curly.makeRequests` per turn.** Lantern is a
-  simultaneous-decision game; a sequential walk over six seats is what blows
-  the play budget, and it is invisible unless something counts the batches.
-  `tests/test_engine.nim` counts them.
+- **All private decisions leave before the game waits for actions.** Lantern
+  is simultaneous; a sequential walk over six seats would blow the play
+  budget. `tests/test_engine.nim` checks the shared request batch.
 - **The parked cogs in a test are not inert scenery.** A seeker parked 30 px
   from a hider lights it through the omni bubble. Park them far apart or
   assert on the specific alias you care about.

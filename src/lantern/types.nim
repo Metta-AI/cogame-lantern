@@ -299,8 +299,6 @@ type
     gameOverTicks*: int
     episodeTimeoutMs*: int
     shutdownGraceMs*: int
-    model*: string
-    maxOutputTokens*: int
 
   Sim* = ref object
     config*: GameConfig

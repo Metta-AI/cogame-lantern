@@ -150,6 +150,14 @@ jobs:
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/lantern-train-bridge
 
+      - name: Mixed ordinary player episode
+        run: |
+          set -euo pipefail
+          nim c -d:release --hints:off --path:src -o:"$RUNNER_TEMP/lantern-game" src/lantern.nim
+          nim c -d:release --hints:off --path:src -o:"$RUNNER_TEMP/lantern-player" src/lantern_player.nim
+          python3 tools/ci/player_policy_smoke.py \
+            "$RUNNER_TEMP/lantern-game" "$RUNNER_TEMP/lantern-player"
+
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
   # end to end in raw docker with the certification fixture's seat mix.
@@ -271,3 +279,31 @@ jobs:
           path: dist/static-replay-viewer
           if-no-files-found: error
           retention-days: 14
+
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build local Coworld bundle
+        run: |
+          set -euo pipefail
+          uvx --from 'coworld[auth]==0.1.43' coworld build \
+            --version 0.0.0 \
+            --project . \
+            --compose compose.yaml \
+            --template coworld_manifest_template.json \
+            --output dist/coworld_manifest.json
+
+      - name: Certify ordinary mixed roster locally
+        run: |
+          set -euo pipefail
+          uvx --from 'coworld[auth]==0.1.43' coworld certify \
+            dist/coworld_manifest.json \
+            --no-open-report \
+            --timeout-seconds 300 2>&1 | tee "$RUNNER_TEMP/certify.log"
+          grep -F 'Replay liveness: skipped (static replay bundle declared' \
+            "$RUNNER_TEMP/certify.log"

@@ -1,17 +1,4 @@
-## Claude-backed decisions for Lantern. A policy is just a prompt: the game
-## server composes the seat's view (role, clock, what that seat can actually
-## see) plus that seat's PLAYER_PROMPT and asks Claude for ONE order.
-##
-## Lantern is a simultaneous-decision game, so every open seat's request goes
-## out as ONE PARALLEL BATCH per turn (`curly.makeRequests`) — never a
-## sequential walk over the seats. A hunt turn batches six requests, a build
-## turn three (the seekers are frozen in the pen and are not asked for an
-## order they could not act on).
-##
-## Every wait is bounded: attempt 1 gets `attempt1Ms`, the single retry gets
-## `attempt2Ms`, and the two together fit inside the per-turn budget. Anything
-## still unanswered falls back to the `warden` scripted order, which costs
-## microseconds, and writes a `fallback` event naming the cause.
+## Claude-backed player policy over one private Lantern observation.
 ##
 ## Credentials, in order of preference:
 ##   Bedrock sidecar / bearer token   - hosted pods
@@ -22,10 +9,10 @@
 ## certification and the docker smoke still complete. That fallback is
 ## load-bearing, not a nicety.
 
-import std/[json, os, strutils, times, unicode]
+import std/[json, os, strutils]
 import bitworld/runtime
 import curly
-import types, sim, orders, baselines, render, labels
+import types, orders
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -66,15 +53,6 @@ type
   LlmTransport* = enum
     ltNone, ltBedrock, ltAnthropic
 
-  LlmRequest* = object
-    seat*: int
-    system*, user*: string
-
-  LlmReply* = object
-    text*: string
-    error*: string
-    startMs*, endMs*: int   ## the in-flight window, for the batching test
-
   LlmClient* = ref object
     curl: Curly
     transport*: LlmTransport
@@ -86,21 +64,6 @@ type
     model*: string
     maxOutputTokens*: int
     disabled*: bool
-    sender*: proc (client: LlmClient, requests: seq[LlmRequest],
-                   timeoutSeconds: int): seq[LlmReply] {.gcsafe.}
-      ## Swappable so tests can drive the turn loop with a fake batch
-      ## transport and assert the one-parallel-batch-per-turn contract.
-
-  FallbackNote* = object
-    attempt*: int
-    cause*: FallbackCause
-    detail*: string
-
-  Decision* = object
-    order*: Order
-    source*: OrderSource
-    latencyMs*: int
-    notes*: seq[FallbackNote]
 
 proc resolveApiKey(): string =
   result = getEnv("ANTHROPIC_API_KEY").strip()
@@ -200,33 +163,10 @@ proc textOf*(client: LlmClient, response: Response, error, url: string): string 
     raise newException(LanternError, "reply cut off at max_tokens before " &
       "any JSON: " & clip(result, 160).oneLine())
 
-proc curlySender(client: LlmClient, requests: seq[LlmRequest],
-                 timeoutSeconds: int): seq[LlmReply] {.gcsafe.} =
-  ## ONE parallel batch. Every open seat's request is in flight at the same
-  ## time; `makeRequests` returns when the slowest has answered or the
-  ## timeout has fired, whichever comes first.
-  result = newSeq[LlmReply](requests.len)
-  var batch: RequestBatch
-  for index, request in requests:
-    let built = client.requestFor(request.system, request.user)
-    batch.post(built.url, built.headers, built.body, $index)
-  let started = int(epochTime() * 1000.0)
-  let responses = client.curl.makeRequests(batch, timeoutSeconds)
-  let ended = int(epochTime() * 1000.0)
-  for index in 0 ..< requests.len:
-    result[index].startMs = started
-    result[index].endMs = ended
-    try:
-      result[index].text = client.textOf(responses[index].response,
-                                         responses[index].error,
-                                         batch[index].url)
-    except CatchableError as error:
-      result[index].error = error.msg
-
-proc newLlmClient*(config: GameConfig): LlmClient =
-  result = LlmClient(model: config.model,
-                     maxOutputTokens: config.maxOutputTokens,
-                     sender: curlySender)
+proc newLlmClient*(): LlmClient =
+  result = LlmClient(
+    model: getEnv("PLAYER_MODEL", "claude-sonnet-5"),
+    maxOutputTokens: getEnv("PLAYER_MAX_OUTPUT_TOKENS", "900").parseInt())
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
   if bedrockEndpoint.len > 0 or bedrockToken.len > 0:
@@ -251,90 +191,20 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     result.disabled = true
     echo "lantern llm: no LLM credentials; using scripted fallback"
 
-proc userPrompt*(sim: Sim, slot: int, prompt: string, retry: bool): string =
-  ## The seat's PLAYER_PROMPT, then a blank line, then the seat's view JSON.
-  ## The prompt text itself is never echoed into the replay; only the
-  ## policy KIND is recorded.
+proc userPrompt*(view: JsonNode, prompt: string, retry: bool): string =
   if prompt.strip().len > 0:
-    result.add(prompt.strip())
+    result.add(clip(prompt, MaxPromptRunes))
     result.add("\n\n")
-  result.add($seatView(sim, slot))
+  result.add($view)
   if retry:
     result.add("\n\nYour previous reply was invalid. Respond with ONLY the " &
       "requested JSON object, beginning with '{' and carrying a legal " &
       "\"intent\" for your role.")
 
-proc decideAll*(client: LlmClient, sim: Sim, half: int, openSeats: seq[int],
-                prompts: seq[string], scripted: seq[ScriptKind],
-                forceScripted: bool): seq[Decision] =
-  ## One decision per seat in `openSeats`, in order. NEVER raises: any
-  ## failure ends at the scripted baseline so the episode always advances.
-  result = newSeq[Decision](openSeats.len)
-  var pending: seq[int]      ## indexes into `openSeats` still undecided
-  for index, seat in openSeats:
-    let kind = scripted[seat]
-    if kind != skNone or client.disabled or forceScripted:
-      result[index].order = scriptedOrder(sim, seat, half, kind)
-      result[index].source = osScripted
-      if kind == skNone and (client.disabled or forceScripted):
-        result[index].source = osFallback
-        result[index].notes.add(FallbackNote(
-          attempt: 0,
-          cause: (if forceScripted: fcBudgetGuard else: fcNoCredentials),
-          detail: (if forceScripted: "budget guard engaged"
-                   else: "no LLM credentials")))
-    else:
-      pending.add(index)
-
-  for attempt in 1 .. 2:
-    if pending.len == 0 or client.disabled:
-      break
-    var requests: seq[LlmRequest]
-    for index in pending:
-      let seat = openSeats[index]
-      requests.add(LlmRequest(
-        seat: seat, system: SystemPrompt,
-        user: userPrompt(sim, seat, prompts[seat], attempt > 1)))
-    let budget =
-      if attempt == 1: (sim.config.attempt1Ms + 999) div 1000
-      else: (sim.config.attempt2Ms + 999) div 1000
-    let replies = client.sender(client, requests, max(1, budget))
-    var stillPending: seq[int]
-    for position, index in pending:
-      let seat = openSeats[index]
-      let reply = replies[position]
-      let latency = max(0, reply.endMs - reply.startMs)
-      if reply.error.len > 0:
-        result[index].notes.add(FallbackNote(
-          attempt: attempt,
-          cause: (if "timeout" in reply.error.toLowerAscii() or
-                     "timed out" in reply.error.toLowerAscii(): fcTimeout
-                  else: fcTransportError),
-          detail: reply.error))
-        stillPending.add(index)
-        continue
-      try:
-        let cog = sim.cogs[seat]
-        let order = parseOrderText(reply.text, roleOfSlot(seat, half),
-                                   Point(x: cog.px, y: cog.py), sim.crates)
-        result[index].order = order
-        result[index].source = osLlm
-        result[index].latencyMs = latency
-      except CatchableError as error:
-        result[index].notes.add(FallbackNote(attempt: attempt,
-                                             cause: fcParseError,
-                                             detail: error.msg))
-        stillPending.add(index)
-    pending = stillPending
-
-  for index in pending:
-    let seat = openSeats[index]
-    echo "lantern llm: seat ", seat, " falling back to the scripted order"
-    result[index].order = scriptedOrder(sim, seat, half, skWarden)
-    result[index].source = osFallback
-
-proc clipPrompt*(prompt: string): string =
-  ## The transport cap on a registered prompt: over-long is truncated on a
-  ## rune boundary, never rejected.
-  if prompt.runeLen <= MaxPromptRunes: prompt
-  else: prompt.runeSubStr(0, MaxPromptRunes)
+proc call*(client: LlmClient, view: JsonNode, prompt: string,
+           retry: bool, timeoutSeconds: int): JsonNode =
+  let request = client.requestFor(SystemPrompt,
+    userPrompt(view, prompt, retry))
+  let response = client.curl.post(request.url, request.headers,
+    request.body, timeoutSeconds)
+  extractJsonObject(client.textOf(response, "", request.url))
