@@ -7,7 +7,7 @@ import types, baselines
 
 type
   PolicyKind* = enum
-    pkScripted, pkPrompt, pkJev
+    pkScripted, pkPrompt, pkExternal
 
   Seat* = object
     kind*: PolicyKind
@@ -36,7 +36,7 @@ proc policyKind*(seat: Seat): string =
   if seat.kind == pkScripted: "scripted" else: "llm"
 
 proc applyRegister*(roster: var Roster, slot: int, frame: JsonNode) =
-  ## `{"type":"register","kind":"scripted|prompt|jev",...}`.
+  ## `{"type":"register","kind":"scripted|prompt|external",...}`.
   if slot < 0 or slot >= roster.seats.len:
     return
   var seat = roster.seats[slot]
@@ -44,7 +44,7 @@ proc applyRegister*(roster: var Roster, slot: int, frame: JsonNode) =
     case frame["kind"].getStr()
     of "scripted": pkScripted
     of "prompt": pkPrompt
-    of "jev": pkJev
+    of "external": pkExternal
     else: raise newException(LanternError, "unknown player policy kind")
   seat.scripted = skNone
   if seat.kind == pkScripted:
