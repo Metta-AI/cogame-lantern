@@ -48,7 +48,7 @@ runs on the replay it fetched from S3.
   `config`, `roster`, `events`, `state`, `arena` → `crates` → `rules` → `sim`
   → `control` → `orders` → `baselines` → `render` → `decision` → `replay`,
   `broadcast` → `server`.
-- `src/lantern/{llm,jev_policy}.nim` — model calls and candidate ranking used
+- `src/lantern/llm.nim` — prompt model calls used
   only by the player executable.
 - `client/` — the broadcast chrome (`replay_broadcast.html`, forked from
   paintbot with its CSS block and every markup id carried across),

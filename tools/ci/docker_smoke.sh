@@ -32,7 +32,6 @@
 #                              set 0 for binary replay formats
 #   SMOKE_EXTRA_ENV            extra "K=V K=V" for every player (empty)
 #   ANTHROPIC_API_KEY          if set, forwarded to prompt players only
-#   TYPESAFE_API_KEY           if set, forwarded to Jev players only
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -161,8 +160,6 @@ for slot in range(seats):
         env_args += ["-e", f"{key}={value}"]
     if (entry.get("env") or {}).get("PLAYER_PROMPT") and os.environ.get("ANTHROPIC_API_KEY"):
         env_args += ["-e", f"ANTHROPIC_API_KEY={os.environ['ANTHROPIC_API_KEY']}"]
-    if (entry.get("env") or {}).get("PLAYER_JEV") and os.environ.get("TYPESAFE_API_KEY"):
-        env_args += ["-e", f"TYPESAFE_API_KEY={os.environ['TYPESAFE_API_KEY']}"]
     for kv in extra_env:
         env_args += ["-e", kv]
     argv = list(entry.get("run") or [player_bin])
