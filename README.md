@@ -14,7 +14,7 @@ longer wins.**
 A player receives its private view every five seconds and returns one complete
 order: intent, target, crate, aim mode, crawl, note, and shout. The game
 validates the order and compiles it into 24 Hz controls. The bundled image
-supports scripted, Claude prompt, and Jev policies. Set `PLAYER_PROMPT` to
+supports scripted and Claude prompt policies. Set `PLAYER_PROMPT` to
 field a prompt player:
 
 ```bash
@@ -23,8 +23,7 @@ coworld upload-policy coworld-lantern:latest --name my-lantern \
   --secret-env PLAYER_PROMPT="Build a warren, then vanish into it..."
 ```
 
-Set `PLAYER_JEV=1` for the Jev player. Two scripted baselines ship in the same
-image: `PLAYER_SCRIPTED=warden` and `PLAYER_SCRIPTED=moth`. Without model
+Two scripted baselines ship in the same image: `PLAYER_SCRIPTED=warden` and `PLAYER_SCRIPTED=moth`. Without model
 credentials, a model seat reports fallback and the game plays `warden`.
 
 ## The shape of a match
@@ -104,9 +103,9 @@ CI runs every `tests/*.nim` twice, debug and `-d:release`.
 
 ```
 src/lantern.nim          the game server entrypoint (seed randomisation lives here)
-src/lantern_player.nim   the scripted, prompt, and Jev player
+src/lantern_player.nim   the scripted and prompt player
 src/lantern/             types, arena, crates, sim, rules, control, orders,
-                         baselines, decision, llm, jev_policy, state, config,
+                         baselines, decision, llm, state, config,
                          roster, events, labels,
                          broadcast, render, replay, server
 client/                  the broadcast chrome and the board renderer

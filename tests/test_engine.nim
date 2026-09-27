@@ -128,12 +128,12 @@ suite "the roster":
     check policyKind(roster.seats[0]) == "scripted"
     check roster.scriptKinds()[0] == skWarden
 
-  test "prompt and Jev register without sending model instructions":
+  test "prompt and external policies register without sending model instructions":
     var roster = initRoster(testConfig())
     roster.applyRegister(0, %*{"type": "register", "kind": "prompt",
                                 "policy": "prompt"})
-    roster.applyRegister(1, %*{"type": "register", "kind": "jev",
-                                "policy": "jev"})
+    roster.applyRegister(1, %*{"type": "register", "kind": "external",
+                                "policy": "external"})
     check policyKind(roster.seats[0]) == "llm"
     check policyKind(roster.seats[1]) == "llm"
     check roster.scriptKinds()[0] == skNone

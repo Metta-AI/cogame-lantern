@@ -14,7 +14,7 @@ remain inside that player:
 
 ```json
 {"type": "register",
- "kind": "scripted" | "prompt" | "jev",
+ "kind": "scripted" | "prompt" | "external",
  "scripted": "warden" | "moth" | null,
  "policy": "<free label, <= 48 runes>"}
 ```

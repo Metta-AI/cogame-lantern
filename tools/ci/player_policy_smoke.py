@@ -1,4 +1,4 @@
-"""Exercise ordinary Jev, prompt, and scripted players on one native game."""
+"""Exercise ordinary prompt and scripted players on one native game."""
 
 import json
 import os
@@ -20,49 +20,25 @@ def main(game_bin: str, player_bin: str) -> None:
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
-            body = json.loads(self.rfile.read(int(self.headers["content-length"])))
-            if self.path == "/v1/systemone":
-                questions = body["questions"]
-                calls.append(("jev", len(questions), tuple(questions)))
-                assert self.headers["x-coworld-player-slot"] == "0"
-                answers = {}
-                for name, question in questions.items():
-                    choices = list(question["criteria"])
-                    preferred = {
-                        "intent": "hide" if "hide" in choices else "sweep",
-                        "target": "self",
-                        "crate": "none",
-                        "aim": "sweep",
-                        "crawl": "no",
-                        "say": "quiet",
-                        "note": "quiet",
-                    }[name]
-                    answers[name] = {
-                        "type": "choice",
-                        "probabilities": {
-                            key: 1.0 if key == preferred else 0.0 for key in choices
-                        },
+            json.loads(self.rfile.read(int(self.headers["content-length"])))
+            assert self.path.endswith("/invoke")
+            calls.append(("prompt", 0, ()))
+            response = {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "intent": "hide",
+                                "target": [240, 329],
+                                "crawl": True,
+                                "note": "prompt-stub",
+                            }
+                        ),
                     }
-                response = {"answers": answers}
-            else:
-                assert self.path.endswith("/invoke")
-                calls.append(("prompt", 0, ()))
-                response = {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "intent": "hide",
-                                    "target": [240, 329],
-                                    "crawl": True,
-                                    "note": "prompt-stub",
-                                }
-                            ),
-                        }
-                    ],
-                    "stop_reason": "end_turn",
-                }
+                ],
+                "stop_reason": "end_turn",
+            }
             payload = json.dumps(response).encode()
             self.send_response(200)
             self.send_header("content-type", "application/json")
@@ -120,7 +96,7 @@ def main(game_bin: str, player_bin: str) -> None:
                         ),
                     }
                 )
-                if seated["player_id"] in ("jev", "prompt"):
+                if seated["player_id"] == "prompt":
                     player_env["AWS_ENDPOINT_URL_BEDROCK_RUNTIME"] = (
                         f"http://127.0.0.1:{server.server_port}"
                     )
@@ -143,28 +119,19 @@ def main(game_bin: str, player_bin: str) -> None:
             results = json.loads((out / "results.json").read_text())
             replay = json.loads((out / "replay.json").read_text())
             assert results["reason"] == "complete"
-            assert results["policy_kinds"][:2] == ["llm", "llm"]
-            assert results["llm_turns"][0] > 0 and results["llm_turns"][1] > 0
+            assert results["policy_kinds"][:2] == ["scripted", "llm"]
+            assert results["llm_turns"][0] == 0 and results["llm_turns"][1] > 0
             assert results["fallback_turns"] == [0] * 6
             orders = [event for event in replay["events"] if event["type"] == "order"]
-            for seat in (0, 1):
+            for seat in (1,):
                 assert any(
                     event["seat"] == seat and event["source"] == "llm"
                     for event in orders
                 )
             assert not any(event["type"] == "fallback" for event in replay["events"])
-            jev = [call for call in calls if call[0] == "jev"]
             prompt = [call for call in calls if call[0] == "prompt"]
-            assert len(jev) == results["llm_turns"][0]
             assert len(prompt) == results["llm_turns"][1]
-            assert all(
-                call[1:]
-                == (7, ("intent", "target", "crate", "aim", "crawl", "say", "note"))
-                for call in jev
-            )
-            print(
-                f"player policy smoke OK: Jev={len(jev)}, prompt={len(prompt)}, fallback=0"
-            )
+            print(f"player policy smoke OK: prompt={len(prompt)}, fallback=0")
         finally:
             server.shutdown()
             for process in processes:

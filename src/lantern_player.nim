@@ -1,4 +1,4 @@
-## Lantern scripted, prompt, and Jev policies over private seat views.
+## Lantern scripted and prompt policies over private seat views.
 ##
 ## The game retains order validation, control, results, and replay.
 ##
@@ -12,7 +12,7 @@
 
 import std/[json, options, os, strutils]
 import whisky
-import lantern/[jev_policy, llm]
+import lantern/llm
 
 const
   DefaultPrompt = """
@@ -39,10 +39,9 @@ when isMainModule:
     quit(1)
   var prompt = getEnv("PLAYER_PROMPT")
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
-  let jev = getEnv("PLAYER_JEV") == "1"
-  if prompt.strip().len == 0 and scripted.len == 0 and not jev:
+  if prompt.strip().len == 0 and scripted.len == 0:
     prompt = DefaultPrompt
-  let kind = if jev: "jev" elif scripted.len > 0: "scripted" else: "prompt"
+  let kind = if scripted.len > 0: "scripted" else: "prompt"
   let label = getEnv("PLAYER_POLICY_LABEL").strip()
   let client = if kind == "prompt": newLlmClient() else: nil
 
@@ -103,12 +102,9 @@ when isMainModule:
           "id": payload["id"],
           "source": "llm"
         }
-        if (kind == "prompt" and client.disabled) or
-            (jev and not jevConfigured()):
+        if client.disabled:
           reply["source"] = %"fallback"
           reply["cause"] = %"no_credentials"
-        elif jev:
-          reply["order"] = chooseJevOrder(payload, timeoutSeconds)
         else:
           reply["order"] = client.call(payload["view"], prompt,
             payload["attempt"].getInt() > 1, timeoutSeconds)
