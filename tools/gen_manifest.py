@@ -327,7 +327,7 @@ manifest = {
             # runnables - lantern ships one image with two entrypoints.
             "image": IMAGE_PLACEHOLDER,
             "run": ["/bin/lantern"],
-            "env": {"ANTHROPIC_API_KEY_URI": "secret://coworld/lantern/anthropic_api_key"},
+            "env": {},
             "source_url": SOURCE,
         },
         "config_schema": {
