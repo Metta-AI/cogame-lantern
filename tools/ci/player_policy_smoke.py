@@ -21,7 +21,7 @@ def main(game_bin: str, player_bin: str) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             json.loads(self.rfile.read(int(self.headers["content-length"])))
-            assert self.path.endswith("/invoke")
+            assert self.path == "/v1/messages"
             calls.append(("prompt", 0, ()))
             response = {
                 "content": [
@@ -97,7 +97,7 @@ def main(game_bin: str, player_bin: str) -> None:
                     }
                 )
                 if seated["player_id"] == "prompt":
-                    player_env["AWS_ENDPOINT_URL_BEDROCK_RUNTIME"] = (
+                    player_env["COWORLD_LLM_ENDPOINT"] = (
                         f"http://127.0.0.1:{server.server_port}"
                     )
                 log = (out / f"player-{slot}.log").open("w")
