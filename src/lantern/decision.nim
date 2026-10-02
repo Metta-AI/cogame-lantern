@@ -40,6 +40,8 @@ proc playerProposal*(raw: string, requestId, seat, half: int,
     let reply = parseJson(raw)
     if reply.hasKey("training_attempt"):
       result.evidence = readAttemptEvidence(reply["training_attempt"])
+      if result.evidence.origin in {aoTeacher, aoHuman}:
+        result.evidence.origin = aoUnknown
     if reply["type"].getStr() == "attempt_timeout":
       raise newException(LanternError, "player action timed out after model request")
     if reply["type"].getStr() != "action" or
@@ -62,9 +64,18 @@ proc playerProposal*(raw: string, requestId, seat, half: int,
     result.order = if reply.hasKey("response"):
       parseOrderText(reply["response"].getStr(), roleOfSlot(seat, half), at, sim.crates)
       else: parseOrder(reply["order"], roleOfSlot(seat, half), at, sim.crates)
+    if result.evidence.origin == aoModel:
+      if result.evidence.response.kind != JString:
+        raise newException(LanternError, "model attempt response must be text")
+      let sampled = parseOrderText(result.evidence.response.getStr(),
+        roleOfSlot(seat, half), at, sim.crates)
+      result.evidence.parsedAction = orderJson(sampled)
+      if result.evidence.parsedAction != orderJson(result.order):
+        raise newException(LanternError, "model response differs from player action")
+    else:
+      result.evidence.parsedAction = orderJson(result.order)
     result.kind = pkAccepted
     result.evidence.accepted = true
-    result.evidence.parsedAction = orderJson(result.order)
   except CatchableError as error:
     result.kind = pkRejected
     result.cause = fcParseError

@@ -1,7 +1,8 @@
 ## The game sends one private view per active model seat before taking actions.
 
-import std/[json, strutils, unicode, unittest]
+import std/[json, options, strutils, unicode, unittest]
 import curly
+import bitworld/decision_trajectory
 import support/helpers
 import lantern/[decision, llm, server]
 
@@ -221,3 +222,27 @@ suite "result and replay on interrupted episodes":
       check value.getFloat() == 0.5
     check results["reason"].getStr() == "deadline"
     check results["end_rule"].getStr() == "wall_clock"
+
+  test "external policies cannot assert server-owned teacher or human origins":
+    let sim = testSim(prep = 240, hunt = 480)
+    for origin in [aoTeacher, aoHuman]:
+      let evidence = newDecisionAttempt("asserted", "external-policy", origin)
+      let reply = %*{"type": "action", "protocol": "lantern.player.v2", "id": 1,
+        "source": "llm", "order": {"intent": "wait"},
+        "training_attempt": evidence.attemptEvidenceJson()}
+      let proposal = playerProposal($reply, 1, 0, 1, sim)
+      check proposal.kind == pkAccepted
+      check proposal.evidence.origin == aoUnknown
+      check proposal.evidence.accepted
+
+  test "model evidence cannot label a different installed order":
+    let sim = testSim(prep = 240, hunt = 480)
+    var evidence = newDecisionAttempt("sampled", "model-policy", aoModel)
+    evidence.response = %"{\"intent\":\"wait\"}"
+    let reply = %*{"type": "action", "protocol": "lantern.player.v2", "id": 1,
+      "source": "llm", "order": {"intent": "hide", "target": [240, 329]},
+      "training_attempt": evidence.attemptEvidenceJson()}
+    let proposal = playerProposal($reply, 1, 0, 1, sim)
+    check proposal.kind == pkRejected
+    check not proposal.evidence.accepted
+    check proposal.evidence.parsedAction["intent"].getStr() == "wait"
