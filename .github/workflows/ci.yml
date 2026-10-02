@@ -150,7 +150,7 @@ jobs:
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/lantern-train-bridge
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-posttrain tools/export_posttrain.nim
-          /tmp/lantern-posttrain "$RUNNER_TEMP/lantern-corpus" 10 1 sprint source-test
+          python3 tools/test_export_seed_family.py /tmp/lantern-posttrain
 
       - name: Private native decision trajectories
         run: |

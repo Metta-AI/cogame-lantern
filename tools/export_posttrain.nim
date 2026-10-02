@@ -50,7 +50,7 @@ when isMainModule:
     let map = loadMapSpec(config.mapPath)
     let sim = newSim(config, map)
     let episodeId = "lantern-" & variant & "-" & $seed
-    let trajectory = newDecisionTrajectory(episodeId, episodeId,
+    let trajectory = newDecisionTrajectory(episodeId, "lantern-" & $seed,
       "lantern", gameVersion, sourceRevision)
     var pending: seq[PendingMacro]
     var rows: seq[string]
@@ -87,7 +87,7 @@ when isMainModule:
               attempts: @[evidence], selectedAttemptId: some(evidence.attemptId))))
           rows.add($(%*{
             "episode_id": "lantern-" & variant & "-" & $seed,
-            "seed": "lantern-" & variant & "-" & $seed,
+            "seed": "lantern-" & $seed,
             "decision_id": rows.len,
             "observation": view, "prompt": prompt,
             "completion": [{"role": "assistant", "content": $completion}],
