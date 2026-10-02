@@ -111,6 +111,7 @@ for flow in ("accepted", "invalid", "sampled", "greedy-null", "greedy-tokens", "
                                   for tick in range(execution["start_tick"], execution["end_tick"]))
                 assert base64.b64decode(execution["seat_controls_b64"]) == actual
                 for attempt in decision["attempts"]:
+                    assert attempt["inference_mode"] == "text_action"
                     if attempt["platform_call_id"] is None: continue
                     call_id = attempt["platform_call_id"]
                     assert call_id not in seen; seen.add(call_id)
