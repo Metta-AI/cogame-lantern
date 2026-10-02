@@ -18,12 +18,12 @@
 ##                    "role":...,"view":{...},"order_source":...}
 ##                   {"done":true,"result":{...}}
 
-import std/[json, locks, monotimes, os, sets, strutils, tables, times]
-import bitworld/runtime
+import std/[json, locks, monotimes, os, sets, strutils, options, tables, times]
+import bitworld/[runtime, decision_trajectory]
 import curly
 import mummy, mummy/routers
 import types, arena, sim, rules, control, orders, decision,
-       render, replay, roster, broadcast, events, labels
+       render, replay, roster, broadcast, events, labels, training_capture
 
 const
   DoneBroadcastMs = 3_000
@@ -43,6 +43,7 @@ type
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     actionReplies: Table[int, string]
+    attemptEvidence: Table[int, JsonNode]
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
@@ -141,6 +142,7 @@ proc exchangeDecisions(requests: seq[JsonNode], timeoutMs: int):
           sockets[position] = state.playerSockets[slot]
           connected[position] = true
           state.actionReplies.del(slot)
+          state.attemptEvidence.del(slot)
     for position, socket in sockets:
       if connected[position]:
         socket.send($requests[position])
@@ -164,6 +166,14 @@ proc exchangeDecisions(requests: seq[JsonNode], timeoutMs: int):
       if not pending:
         break
       sleep(10)
+    withLock stateLock:
+      for position, request in requests:
+        let slot = request["slot"].getInt()
+        if result[position].len == 0 and state.attemptEvidence.hasKey(slot):
+          let evidence = state.attemptEvidence[slot]
+          if evidence["id"] == request["id"]:
+            result[position] = $(%*{"type": "attempt_timeout",
+              "training_attempt": evidence["training_attempt"]})
 
 # ---------------------------------------------------------------------------
 # The turn loop.
@@ -194,6 +204,12 @@ proc nowMs(): int = int(epochTime() * 1000.0)
 proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = state.config
+    let trajectoryUri = getEnv(CogameSaveTrajectoryUriEnv)
+    let trajectory = if trajectoryUri.len > 0:
+      newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"), "lantern-" & $config.seed,
+        "lantern", getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION"))
+      else: nil
+    var pendingMacros: seq[PendingMacro]
     let startMs = nowMs()
     let connectDeadline = startMs + config.playerConnectTimeoutMs
     while nowMs() < connectDeadline:
@@ -273,6 +289,9 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                                           state.sim.hidersLeft(half)))
 
         if isTurn:
+          if trajectoryUri.len > 0:
+            withLock stateLock:
+              trajectory.recordMacros(state.sim, pendingMacros)
           ## The budget guard settles early rather than overrunning: once two
           ## more full turn budgets would not fit, every remaining turn is
           ## played on the scripted layer (well under a millisecond a turn),
@@ -298,6 +317,9 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               state.sim.cogs[slot].order = decision.order
               state.sim.cogs[slot].orderSource = decision.source
               state.sim.cogs[slot].hasOrder = true
+              if trajectoryUri.len > 0:
+                pendingMacros.add(PendingMacro(seat: slot,
+                  startTick: state.sim.tick, decision: decision))
               sources[slot] = $decision.source
               if decision.source == osLlm:
                 inc state.llmTurns[slot]
@@ -341,6 +363,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       if state.finished:
         return
       state.finished = true
+      if trajectoryUri.len > 0:
+        trajectory.recordMacros(state.sim, pendingMacros, terminal = true)
       state.sim.endReason = reason
       state.sim.endRule = rule
       let kinds = state.roster.policyKinds()
@@ -357,6 +381,11 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                     else: results["winner"].getInt())
       state.sim.emit(endEvent(state.sim.tick, reason, rule, scoresMilli,
                               fracMicro, winner))
+      if trajectoryUri.len > 0:
+        var outcomes = newJObject()
+        for slot in 0 ..< config.numAgents: outcomes[$slot] = results["scores"][slot]
+        trajectory.finish((if reason == erComplete: esCompleted
+          elif reason == erDeadline: esTruncated else: esFailed), results, outcomes)
       state.lastResults = results
       replayData = $buildReplay(state.sim, kinds, results)
       let final = %*{"done": true, "result": results}
@@ -376,6 +405,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         break
       sleep(100)
 
+    if trajectoryUri.len > 0:
+      trajectory.writeEventsToUri(trajectoryUri)
     echo "lantern: writing replay and results (", reason, "/", rule, ")"
     try:
       writeArtifact(runtimeConfig.replayUri, replayData, "application/json",
@@ -584,13 +615,16 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
             state.roster.applyRegister(slot, payload)
             echo "lantern: slot ", slot, " registered (",
               policyKind(state.roster.seats[slot]), ")"
+        elif payload{"type"}.getStr() == "attempt_started":
+          withLock stateLock:
+            state.attemptEvidence[slot] = copy(payload)
         elif payload{"type"}.getStr() == "action":
           let actionId = payload{"id"}
           if not actionId.isNil and actionId.kind == JInt:
             withLock stateLock:
               state.actionReplies[slot] = message.data
       except CatchableError as error:
-        echo "lantern: ignoring bad player frame: ", error.msg
+        echo "lantern: ignoring bad private player frame"
     of ErrorEvent:
       discard
     of CloseEvent:

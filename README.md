@@ -119,3 +119,38 @@ Lantern is forked from [`Metta-AI/coworld-ctf`](https://github.com/Metta-AI/cowo
 (paintbot) — its integer physics, its fog-of-war cone, its pushable props and
 its broadcast chrome — with the server-side LLM client and the JSON replay
 shape taken from [`Metta-AI/cogame-bullwhip`](https://github.com/Metta-AI/cogame-bullwhip).
+
+## Private post-training evidence
+
+`COGAME_SAVE_TRAJECTORY_URI` receives engine-owned private decision JSONL, separate
+from spectator replay. Enable capture with `COWORLD_EPISODE_ID`,
+`COWORLD_GAME_VERSION`, and immutable `COWORLD_SOURCE_REVISION`. All model attempts
+retain exact prompts, requests, raw responses, real sidecar call IDs and available
+checkpoint/tokenizer/sampling evidence. Failed attempts remain rejected; the game
+alone chooses and records the executed order. Each macro has an exclusive tick
+range and the actual four control bytes per seat per tick. Episode outcomes include
+the complete engine results and participant scores.
+
+The language bridge uses the same hosted prompt and order parser:
+
+```sh
+lantern-train-bridge coworld_manifest_template.json sprint --language "Your strategy"
+lantern-posttrain /private/lantern-corpus 10 1 sprint SOURCE_GAME_VERSION
+```
+
+The local teacher consumes only each exact private seat view. Its exports include
+private canonical trajectories and train/validation rows split by seed; they have
+no invented platform call IDs. Numeric bridge mode remains a separate action
+interface. Language rejection returns the exact hosted retry prompt once, followed
+by the actual game-owned fallback after a second rejection. Fallbacks are excluded
+from supervised targets. Keep corpora outside this checkout and review their
+contents before training. Docker contexts exclude private JSONL evidence.
+
+`COWORLD_LLM_TEMPERATURE` explicitly configures the native request in `[0,1]`;
+greedy preserves null probabilities, while stochastic training requires actual
+gateway sampling evidence. Local HTTP fixture proof does not certify an actual
+platform-hosted episode or learner reinforcement-learning run.
+
+Publishing these changes requires the reviewed Metta runtime to be deployed and
+its episode/version/source environment pins verified. The old deployed runtime
+does not supply them. Source modernization alone does not authorize a re-upload.

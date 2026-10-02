@@ -149,6 +149,14 @@ jobs:
         run: |
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/lantern-train-bridge
+          nim c -d:release --hints:off --path:src -o:/tmp/lantern-posttrain tools/export_posttrain.nim
+          /tmp/lantern-posttrain "$RUNNER_TEMP/lantern-corpus" 10 1 sprint source-test
+
+      - name: Private native decision trajectories
+        run: |
+          nim c -d:release --hints:off --path:src -o:/tmp/lantern-game src/lantern.nim
+          nim c -d:release --hints:off --path:src -o:/tmp/lantern-player src/lantern_player.nim
+          python3 tools/test_native_trajectory.py /tmp/lantern-game /tmp/lantern-player
 
       - name: Mixed ordinary player episode
         run: |
@@ -291,7 +299,7 @@ jobs:
       - name: Build local Coworld bundle
         run: |
           set -euo pipefail
-          uvx --from 'coworld[auth]==0.1.43' coworld build \
+          uvx --from 'coworld[auth]==0.1.56' coworld build \
             --version 0.0.0 \
             --project . \
             --compose compose.yaml \
@@ -301,7 +309,7 @@ jobs:
       - name: Certify ordinary mixed roster locally
         run: |
           set -euo pipefail
-          uvx --from 'coworld[auth]==0.1.43' coworld certify \
+          uvx --from 'coworld[auth]==0.1.56' coworld certify \
             dist/coworld_manifest.json \
             --no-open-report \
             --timeout-seconds 300 2>&1 | tee "$RUNNER_TEMP/certify.log"
