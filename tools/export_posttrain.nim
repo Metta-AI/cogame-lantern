@@ -87,7 +87,7 @@ when isMainModule:
               attempts: @[evidence], selectedAttemptId: some(evidence.attemptId))))
           rows.add($(%*{
             "episode_id": "lantern-" & variant & "-" & $seed,
-            "seed": "lantern-" & variant & "-" & $seed,
+            "seed": "lantern-" & $seed,
             "decision_id": rows.len,
             "observation": view, "prompt": prompt,
             "completion": [{"role": "assistant", "content": $completion}],

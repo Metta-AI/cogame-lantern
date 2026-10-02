@@ -17,3 +17,6 @@ with tempfile.TemporaryDirectory() as directory:
         assert len(episodes) == 10
         assert {event["seed_family"] for event in episodes} == {f"lantern-{seed}" for seed in range(1, 11)}
         assert all(event["game"] == "lantern" for event in episodes)
+        for name in ("train.jsonl", "validation.jsonl"):
+            rows = [json.loads(line) for line in (output / name).read_text().splitlines()]
+            assert all(row["seed"] == "lantern-" + row["episode_id"].rsplit("-", 1)[1] for row in rows)
