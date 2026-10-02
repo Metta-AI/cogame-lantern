@@ -3,3 +3,9 @@ nim.cfg
 nimcache
 replay-viewer/dist
 dist
+
+# Private model evidence and training corpora must never enter images.
+**/*.jsonl
+**/qualification.json
+training-data
+training-corpus

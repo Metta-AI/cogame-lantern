@@ -2,7 +2,7 @@
 ## nim c -d:release --path:src -o:lantern-train-bridge tools/train_bridge.nim
 
 import std/[json, os]
-import lantern/[arena, baselines, config, control, crates, labels, llm, orders, render,
+import lantern/[decision, training_policy, arena, baselines, config, control, crates, labels, llm, orders, render,
                 replay, rules, server, sim, types]
 
 const
@@ -200,25 +200,40 @@ proc hostedOrder(candidate: JsonNode): JsonNode =
     candidate["target_y"]], "crate": candidate["crate"],
     "aim": candidate["aim"], "crawl": candidate["crawl"]}
 
-proc decision(view: JsonNode, seat, id: int): JsonNode =
+var languageMode = false
+var operatorPrompt = OperatorPrompt
+
+proc decision(view: JsonNode, seat, id: int, retry = false): JsonNode =
   var properties = newJObject()
   var required = newJArray()
   for head in heads():
     let name = head["name"].getStr()
     properties[name] = %*{"enum": head["choices"]}
     required.add(%name)
-  %*{"kind": "decision", "game": "lantern", "decision_id": id,
+  result = %*{"kind": "decision", "game": "lantern", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": view["turn"],
     "semantic_view": view, "inbox": [],
     "messages": [{"role": "system", "content": SystemPrompt},
-      {"role": "user", "content": OperatorPrompt & "\n\n" & $view}],
+      {"role": "user", "content": userPrompt(view, operatorPrompt, retry)}],
     "speech_messages": [],
     "action_schema": {"type": "object", "properties": properties,
-      "required": required}, "typed_question": newJNull()}
+      "required": required}, "typed_question": newJNull(),
+    "inference_mode": newJNull()}
+  if languageMode:
+    result["inference_mode"] = %"text_action"
+    result["action_schema"] = %*{"type": "object", "properties": {
+      "intent": {"enum": Intents}, "target": {"type": "array"},
+      "crate": {}, "aim": {"enum": Aims}, "crawl": {"type": "boolean"},
+      "note": {"type": "string"}, "say": {"type": "string"}}, "required": ["intent"]}
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len != 2: quit("usage: lantern-train-bridge MANIFEST VARIANT", 1)
+  if args.len notin 2 .. 4:
+    quit("usage: lantern-train-bridge MANIFEST VARIANT [--language [OPERATOR_PROMPT]]", 1)
+  if args.len >= 3:
+    doAssert args[2] == "--language"
+    languageMode = true
+  if args.len == 4: operatorPrompt = args[3]
   let variant = args[1]
   doAssert variant in Variants
   let manifest = parseFile(args[0])
@@ -231,6 +246,7 @@ when isMainModule:
   var views: array[Seats, JsonNode]
   var id = 0
   var index = 0
+  var rejectedAttempts = 0
   while not stdin.endOfFile:
     let request = parseJson(stdin.readLine())
     var response: JsonNode
@@ -252,6 +268,7 @@ when isMainModule:
       for seat in active: views[seat] = seatView(game, seat)
       index = 0
       id = 0
+      rejectedAttempts = 0
       response = views[active[index]].decision(active[index], id)
     of "encode":
       doAssert game.tick < totalTicks(game.config)
@@ -262,19 +279,41 @@ when isMainModule:
       doAssert game.tick < totalTicks(game.config)
       let phase = phaseAt(game.config, game.tick)
       let seat = active[index]
-      response = %*{"response": $action(scriptedOrder(game, seat, phase.half,
-        if seat mod 2 == 0: skWarden else: skMoth))}
+      let cog = game.cogs[seat]
+      let teacher = parseOrder(teacherReply(views[seat]), roleOfSlot(seat, phase.half),
+        Point(x: cog.px, y: cog.py), game.crates)
+      response = %*{"response": $(if languageMode: orderJson(teacher) else: action(teacher))}
     of "step":
       doAssert game.tick < totalTicks(game.config) and
         request["decision_id"].getInt() == id
-      let candidate = parseJson(request["response"].getStr())
-      for head in heads():
-        doAssert candidate[head["name"].getStr()] in head["choices"]
       let seat = active[index]
       let phase = phaseAt(game.config, game.tick)
       let cog = game.cogs[seat]
-      let parsed = parseOrder(candidate.hostedOrder(),
-        roleOfSlot(seat, phase.half), Point(x: cog.px, y: cog.py), game.crates)
+      var parsed: Order
+      var consumed = false
+      var rejection = ""
+      if languageMode:
+        let frame = %*{"type": "action", "protocol": "lantern.player.v2", "id": id,
+          "source": "llm", "response": request["response"]}
+        let proposal = playerProposal($frame, id, seat, phase.half, game)
+        if proposal.kind == pkRejected:
+          inc rejectedAttempts
+          rejection = "invalid private player reply"
+          if rejectedAttempts == 1:
+            stdout.writeLine($(%*{"kind": "rejected", "reason": rejection,
+              "observation": views[seat].decision(seat, id, retry = true)}))
+            stdout.flushFile()
+            continue
+          parsed = scriptedOrder(game, seat, phase.half, skWarden)
+          consumed = true
+        else: parsed = proposal.order
+      else:
+        let candidate = parseJson(request["response"].getStr())
+        for head in heads():
+          doAssert candidate[head["name"].getStr()] in head["choices"]
+        parsed = parseOrder(candidate.hostedOrder(), roleOfSlot(seat, phase.half),
+          Point(x: cog.px, y: cog.py), game.crates)
+      rejectedAttempts = 0
       game.cogs[seat].order = parsed
       game.cogs[seat].orderSource = osLlm
       game.cogs[seat].hasOrder = true
@@ -307,8 +346,10 @@ when isMainModule:
         else:
           index = 0
           observation = views[active[index]].decision(active[index], id)
-      response = %*{"kind": "accepted", "action": candidate,
+      response = %*{"kind": (if consumed: "consumed_rejection" else: "accepted"),
+        "action": (if languageMode: orderJson(parsed) else: action(parsed)),
         "observation": observation}
+      if consumed: response["reason"] = %rejection
     else:
       raise newException(ValueError, "unknown command: " & request["kind"].getStr())
     stdout.writeLine($response)

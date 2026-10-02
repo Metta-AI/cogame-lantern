@@ -12,6 +12,7 @@
 
 import std/[json, options, os, strutils]
 import whisky
+import bitworld/decision_trajectory
 import lantern/llm
 
 const
@@ -72,6 +73,7 @@ when isMainModule:
   socket.send(registerFrame())
   echo "lantern player: registered (", kind, ")"
 
+  var pendingId = -1
   while true:
     let received = socket.receiveMessage()
     if received.isNone:
@@ -106,11 +108,26 @@ when isMainModule:
           reply["source"] = %"fallback"
           reply["cause"] = %"no_credentials"
         else:
-          reply["order"] = client.call(payload["view"], prompt,
-            payload["attempt"].getInt() > 1, timeoutSeconds)
+          pendingId = payload["id"].getInt()
+          proc attemptStarted(attempt: DecisionAttempt) =
+            socket.send($(%*{"type": "attempt_started", "id": payload["id"],
+              "training_attempt": attempt.attemptEvidenceJson()}))
+          reply["response"] = %client.call(payload["view"], prompt,
+            payload["attempt"].getInt() > 1, timeoutSeconds,
+            payload["slot"].getInt(), $payload["slot"].getInt() & "-" &
+              $payload["id"].getInt(), (if label.len > 0: label else: "prompt"),
+            attemptStarted)
+          reply["training_attempt"] = client.lastAttempt.attemptEvidenceJson()
         socket.send($reply)
+        pendingId = -1
       else:
         discard
     except CatchableError as error:
-      echo "lantern player: frame or policy failed: ", error.msg
+      if pendingId >= 0:
+        client.lastAttempt.rejectionReason = some(error.msg)
+        socket.send($(%*{"type": "action", "protocol": "lantern.player.v2",
+          "id": pendingId, "source": "llm",
+          "training_attempt": client.lastAttempt.attemptEvidenceJson()}))
+        pendingId = -1
+      echo "lantern player: frame or policy failed"
   socket.close()

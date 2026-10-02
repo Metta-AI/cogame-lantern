@@ -36,7 +36,8 @@ informational `turn` frame. The final frame carries results:
  "view": { …private seat view… }}
 
 {"type": "action", "protocol": "lantern.player.v2", "id": 20401,
- "source": "llm", "order": { …ordinary order… }}
+ "source": "llm", "response": "<exact model text>",
+ "training_attempt": { …private attempt evidence… }}
 
 {"type": "turn", "turn": 17, "tick": 2040, "half": 1, "act": "hunt",
  "role": "hider", "view": { … }, "order_source": "llm"}
@@ -233,3 +234,19 @@ startup), `COGAME_HOST`, `COGAME_PORT`. At the end of an episode the server
 broadcasts `done` to every seat with a bounded 3 s wait, writes the replay, and
 then writes the results — in that order, because the hosted worker tears the
 player pods down the moment `results.json` exists.
+
+## Private training capture
+
+Native players send an `attempt_started` frame with the current decision `id` and
+strict `training_attempt` before making the HTTP request. They return the completed
+attempt on `action`; external policies may instead return an ordinary `order`
+object without model evidence. Such actions retain unknown origin and cannot become
+model training labels. Only the game assigns parsed action, acceptance, and the
+selected attempt after applying the ordinary parser.
+
+Attempt frames are authenticated through the player socket token and never sent
+to `/global`, replay, or stdout. The private trajectory sink retains all retries,
+unanswered requests, actual platform call IDs, exact private inputs, and physical
+macro execution. A macro ends at the next decision turn or terminal tick; its end
+tick is exclusive. The four control bytes per tick use the same encoding as replay.
+Platform archive joins must independently verify player-supplied model provenance.

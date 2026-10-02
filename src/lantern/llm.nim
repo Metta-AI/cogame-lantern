@@ -10,8 +10,8 @@
 ## certification and the docker smoke still complete. That fallback is
 ## load-bearing, not a nicety.
 
-import std/[json, os, strutils]
-import bitworld/runtime
+import std/[json, math, options, os, strutils]
+import bitworld/[runtime, decision_trajectory]
 import curly
 import types, orders
 
@@ -66,6 +66,8 @@ type
     model*: string
     maxOutputTokens*: int
     disabled*: bool
+    temperature*: float
+    lastAttempt*: DecisionAttempt
 
 proc resolveApiKey(): string =
   result = getEnv("ANTHROPIC_API_KEY").strip()
@@ -110,7 +112,7 @@ proc requestFor(client: LlmClient, system, user: string, slot: int):
     tuple[url: string, headers: HttpHeaders, body: string] =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
-    "temperature": 0.4,
+    "temperature": client.temperature,
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
@@ -173,8 +175,12 @@ proc textOf*(client: LlmClient, response: Response, error, url: string): string 
 
 proc newLlmClient*(): LlmClient =
   result = LlmClient(
+    temperature: parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "0.4")),
     model: getEnv("PLAYER_MODEL", "claude-sonnet-5"),
     maxOutputTokens: getEnv("PLAYER_MAX_OUTPUT_TOKENS", "900").parseInt())
+  if classify(result.temperature) in {fcNan, fcInf, fcNegInf} or
+      result.temperature < 0 or result.temperature > 1:
+    raise newException(LanternError, "COWORLD_LLM_TEMPERATURE must be finite and in [0, 1]")
   let sidecarEndpoint = getEnv("COWORLD_LLM_ENDPOINT").strip()
   if sidecarEndpoint.len > 0:
     result.transport = ltSidecar
@@ -217,9 +223,47 @@ proc userPrompt*(view: JsonNode, prompt: string, retry: bool): string =
       "\"intent\" for your role.")
 
 proc call*(client: LlmClient, view: JsonNode, prompt: string,
-           retry: bool, timeoutSeconds: int): JsonNode =
-  let request = client.requestFor(SystemPrompt,
-    userPrompt(view, prompt, retry), -1)
+           retry: bool, timeoutSeconds, slot: int, attemptId, policy: string,
+           beforeCall: proc(attempt: DecisionAttempt) {.closure.}): string =
+  let user = userPrompt(view, prompt, retry)
+  let request = client.requestFor(SystemPrompt, user, slot)
+  client.lastAttempt = newDecisionAttempt(attemptId, policy, aoModel)
+  client.lastAttempt.prompt = %*[{"role": "system", "content": SystemPrompt},
+    {"role": "user", "content": user}]
+  client.lastAttempt.request = parseJson(request.body)
+  client.lastAttempt.model = some(if client.transport == ltBedrock:
+    client.bedrockModels[client.bedrockModel] else: client.model)
+  client.lastAttempt.decoder = %*{"temperature": client.temperature,
+    "max_tokens": client.maxOutputTokens}
+  beforeCall(client.lastAttempt)
   let response = client.curl.post(request.url, request.headers,
     request.body, timeoutSeconds)
-  extractJsonObject(client.textOf(response, "", request.url))
+  client.lastAttempt.rawResponse = %response.body
+  if response.headers.contains("X-Softmax-Llm-Call-Id"):
+    client.lastAttempt.platformCallId = some(response.headers["X-Softmax-Llm-Call-Id"])
+  for header in ["X-Coworld-Checkpoint-Sha256", "X-Coworld-Tokenizer-Sha256",
+      "X-Coworld-Chat-Template-Sha256"]:
+    if response.headers.contains(header):
+      case header
+      of "X-Coworld-Checkpoint-Sha256": client.lastAttempt.modelIdentity = some(response.headers[header])
+      of "X-Coworld-Tokenizer-Sha256": client.lastAttempt.tokenizerIdentity = some(response.headers[header])
+      else: client.lastAttempt.chatTemplateSha256 = some(response.headers[header])
+  let text = client.textOf(response, "", request.url)
+  client.lastAttempt.response = %text
+  let payload = parseJson(response.body)
+  if payload.hasKey("model"): client.lastAttempt.model = some(payload["model"].getStr())
+  client.lastAttempt.stopReason = some(payload["stop_reason"].getStr())
+  if payload.hasKey("sampling_evidence") and payload["sampling_evidence"].kind != JNull:
+    let sampling = payload["sampling_evidence"]
+    var promptIds, sampledIds: seq[int]
+    var probabilities: seq[float]
+    for token in sampling["prompt_token_ids"]: promptIds.add(token.getInt())
+    for token in sampling["completion_token_ids"]: sampledIds.add(token.getInt())
+    client.lastAttempt.promptTokenIds = some(promptIds)
+    client.lastAttempt.sampledTokenIds = some(sampledIds)
+    if sampling["behavior_log_probs"].kind != JNull:
+      for probability in sampling["behavior_log_probs"]: probabilities.add(probability.getFloat())
+      client.lastAttempt.behaviorLogprobs = some(probabilities)
+    client.lastAttempt.stopReason = some(sampling["stop_reason"].getStr())
+    client.lastAttempt.decoder["sampling_evidence"] = copy(sampling)
+  text
