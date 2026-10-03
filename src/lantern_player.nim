@@ -24,7 +24,7 @@ aim "track" and stay on it - half a second in the beam is a find.
 
 
 type PlayerCall = object
-  socket: NativeWebSocket
+  socket: ptr NativeWebSocket
   decisionId, view, prompt, policy: string
   deadline: MonoTime
   retry: bool
@@ -58,7 +58,7 @@ proc runDecision(call: PlayerCall) {.gcsafe.} =
       let evidence = attempt.attemptEvidenceJson()
       {.gcsafe.}:
         withLock evidenceLock: workerEvidence = $evidence
-      let sent = call.socket.sendNativeText($(%*{"type": "attempt_started", "decision_id": call.decisionId,
+      let sent = call.socket[].sendNativeText($(%*{"type": "attempt_started", "decision_id": call.decisionId,
         "training_attempt": evidence}), call.deadline)
       if sent.kind != wsReady: raise newException(ValueError, "native attempt start was not delivered")
     try:
@@ -72,7 +72,7 @@ proc runDecision(call: PlayerCall) {.gcsafe.} =
     {.gcsafe.}:
       withLock evidenceLock: workerEvidence = $reply["training_attempt"]
   if not interruptionRequested():
-    discard call.socket.sendNativeText($reply, call.deadline)
+    discard call.socket[].sendNativeText($reply, call.deadline)
 
 proc stopAndAcknowledge(socket: NativeWebSocket, decisionId, stopId: JsonNode,
     cleanupDeadline: MonoTime): bool =
@@ -168,7 +168,7 @@ when isMainModule:
         decisionId = issuedId
         withLock evidenceLock: workerEvidence.setLen(0)
         workerFinished.store(false)
-        createThread(worker, runDecision, PlayerCall(socket: socket,
+        createThread(worker, runDecision, PlayerCall(socket: socket.addr,
           decisionId: decisionId.getStr(), view: $payload["observation"], prompt: prompt,
           policy: (if label.len > 0: label else: "prompt"), retry: payload["attempt"].getInt() > 1,
           slot: payload["slot"].getInt(), deadline: receivedAt + initDuration(milliseconds = budget)))
