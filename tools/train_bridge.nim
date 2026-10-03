@@ -293,9 +293,11 @@ when isMainModule:
       var consumed = false
       var rejection = ""
       if languageMode:
-        let frame = %*{"type": "action", "protocol": "lantern.player.v2", "id": id,
-          "source": "llm", "response": request["response"]}
-        let proposal = playerProposal($frame, id, seat, phase.half, game)
+        let wireId = "lantern-bridge-" & $id
+        let frame = %*{"type": "action", "protocol": "lantern.player.v3", "decision_id": wireId,
+          "source": "external", "response": request["response"], "training_attempt": nil}
+        let proposal = playerProposal($frame, wireId, seat, phase.half, game)
+        doAssert proposal.kind != pkInterrupted
         if proposal.kind == pkRejected:
           inc rejectedAttempts
           rejection = "invalid private player reply"

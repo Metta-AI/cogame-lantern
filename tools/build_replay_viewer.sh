@@ -24,12 +24,16 @@ fi
 
 export PATH="$HOME/.nimby/nim/bin:$PATH"
 
-if command -v emcc >/dev/null && command -v nim >/dev/null; then
-  # Local toolchain: build the wasm module and assemble dist/ directly.
+pinned_emscripten="$(sed -n 's/^FROM emscripten\/emsdk:\([^ ]*\).*/\1/p' "$repo_dir/Dockerfile.replay-viewer")"
+pinned_nim="$(sed -n 's/.*nimby use \([0-9.]*\).*/\1/p' "$repo_dir/Dockerfile.replay-viewer")"
+if command -v emcc >/dev/null && command -v nim >/dev/null &&
+   [[ "$(emcc --version | sed -n '1s/.*) \([0-9.]*\).*/\1/p')" == "$pinned_emscripten" ]] &&
+   [[ "$(nim --version | sed -n '1s/^Nim Compiler Version \([^ ]*\).*/\1/p')" == "$pinned_nim" ]]; then
+  # Matching pinned local toolchain: assemble the same WASM module directly.
   (
     cd "${repo_dir}"
-    nim c --hints:off -d:emscripten replay-viewer/lantern_replay.nim
-    nim r --hints:off --path:src tools/gen_wire_constants.nim \
+    nim c --parallelBuild:1 --hints:off -d:emscripten replay-viewer/lantern_replay.nim
+    nim r --parallelBuild:1 --hints:off --path:src tools/gen_wire_constants.nim \
       > replay-viewer/dist/wire_constants.js
     cp client/chrome_common.js client/broadcast_core.js replay-viewer/dist/
     cp replay-viewer/static_replay.js replay-viewer/static_replay_worker.js \
@@ -43,9 +47,9 @@ if command -v emcc >/dev/null && command -v nim >/dev/null; then
         client/replay_broadcast.html > replay-viewer/dist/index.html
   )
 else
-  # Fall back to the pinned emsdk container (the CI runner has no emcc).
+  # Use the pinned container when local compiler versions do not match.
   image_tag="lantern-replay-viewer-build:$$"
-  docker build --platform linux/amd64 \
+  docker build --load --platform linux/amd64 \
     --file "${repo_dir}/Dockerfile.replay-viewer" \
     --tag "${image_tag}" "${repo_dir}"
   container_id="$(docker create "${image_tag}")"

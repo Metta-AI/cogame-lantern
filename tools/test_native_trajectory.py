@@ -15,37 +15,44 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME, PLAYER = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
-for flow in ("accepted", "invalid", "sampled", "greedy-null", "greedy-tokens", "provider-error"):
+for flow in ("accepted", "invalid", "sampled", "greedy-null", "greedy-tokens", "provider-error", "malformed-json", "malformed-schema", "invalid-token-types", "large-metadata"):
     calls = {}
     class Provider(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["content-length"])))
             slot = int(self.headers["X-Coworld-Player-Slot"])
             assert self.path == "/v1/messages" and slot in range(6)
-            assert request["temperature"] == (1 if flow == "sampled" else 0)
+            assert request["temperature"] == (1 if flow in {"sampled", "large-metadata"} else 0)
             text = "private-invalid-response" if flow == "invalid" and slot == 0 else '{"intent":"wait"}'
             call_id = str(uuid.uuid4())
             body = {"id": "msg_" + call_id, "model": "fixture/served", "stop_reason": "end_turn",
-                    "content": [{"type": "text", "text": text}]}
+                    "content": [{"type": "text", "text": text}], "usage": {"input_tokens": 17, "output_tokens": 5}}
             if flow == "greedy-null": body["sampling_evidence"] = None
-            if flow in {"sampled", "greedy-tokens"}:
+            if flow in {"sampled", "greedy-tokens", "large-metadata"}:
                 body["sampling_evidence"] = {
                     "policy_revision": "a" * 64, "tokenizer_revision": "b" * 64,
-                    "chat_template": "fixture-template", "sampling": "full_softmax_temperature_one" if flow == "sampled" else "greedy",
+                    "chat_template": "fixture-template", "sampling": "full_softmax_temperature_one" if flow in {"sampled", "large-metadata"} else "greedy",
                     "enable_thinking": False, "max_new_tokens": request["max_tokens"],
-                    "max_sequence_length": 4096, "sampling_seed": 7, "eos_token_ids": [4],
-                    "prompt_token_ids": [1, 2], "completion_token_ids": [3, 4],
-                    "behavior_log_probs": [-0.5, -0.3] if flow == "sampled" else None,
+                    "max_sequence_length": 32768 + request["max_tokens"] if flow == "large-metadata" else 4096, "sampling_seed": 7, "eos_token_ids": [4],
+                    "prompt_token_ids": list(range(32768)) if flow == "large-metadata" else [1, 2], "completion_token_ids": [3, 4],
+                    "behavior_log_probs": [-0.5, -0.3] if flow in {"sampled", "large-metadata"} else None,
                     "stop_reason": "eos", "response": text}
             if flow == "provider-error" and slot == 0:
                 body = {"error": {"message": "private-provider-error"}}
+            if flow == "malformed-schema" and slot == 0:
+                body["sampling_evidence"] = {"private-schema-sentinel": "must-stay-private"}
+            if flow == "invalid-token-types" and slot == 0:
+                body["sampling_evidence"] = {"prompt_token_ids": ["private-token-sentinel"],
+                    "completion_token_ids": [4], "behavior_log_probs": ["private-probability-sentinel"],
+                    "stop_reason": "eos"}
             calls[call_id] = (request, body)
-            encoded = json.dumps(body).encode()
+            encoded = (b'{"private-json-sentinel":"must-stay-private"' if flow == "malformed-json" and slot == 0
+                       else json.dumps(body).encode())
             self.send_response(429 if flow == "provider-error" and slot == 0 else 200)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(encoded)))
             self.send_header("X-Softmax-Llm-Call-Id", call_id)
-            if flow in {"sampled", "greedy-tokens"}:
+            if flow in {"sampled", "greedy-tokens", "large-metadata"}:
                 self.send_header("X-Coworld-Checkpoint-Sha256", "a" * 64)
                 self.send_header("X-Coworld-Tokenizer-Sha256", "b" * 64)
                 self.send_header("X-Coworld-Chat-Template-Sha256", "c" * 64)
@@ -75,9 +82,10 @@ for flow in ("accepted", "invalid", "sampled", "greedy-null", "greedy-tokens", "
                "COGAME_SAVE_REPLAY_URI": (output / "replay.json").as_uri(),
                "COGAME_SAVE_TRAJECTORY_URI": (output / "trajectory.jsonl").as_uri(),
                "COWORLD_EPISODE_ID": str(uuid.uuid4()), "COWORLD_GAME_VERSION": "native-fixture-v1",
-               "COWORLD_SOURCE_REVISION": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+               "COWORLD_SOURCE_REVISION": (os.environ["COWORLD_TEST_SOURCE_REVISION"] if "COWORLD_TEST_SOURCE_REVISION" in os.environ
+                                            else subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()),
                "COWORLD_LLM_ENDPOINT": f"http://127.0.0.1:{provider.server_port}",
-               "COWORLD_LLM_MODEL": "fixture/requested", "COWORLD_LLM_TEMPERATURE": "1" if flow == "sampled" else "0",
+               "COWORLD_LLM_MODEL": "fixture/requested", "COWORLD_LLM_TEMPERATURE": "1" if flow in {"sampled", "large-metadata"} else "0",
                "PLAYER_PROMPT": "private-guidance-fixture", "PLAYER_SCRIPTED": ""}
         processes, logs = [], []
         try:
@@ -116,10 +124,24 @@ for flow in ("accepted", "invalid", "sampled", "greedy-null", "greedy-tokens", "
                     call_id = attempt["platform_call_id"]
                     assert call_id not in seen; seen.add(call_id)
                     request, body = calls[call_id]
-                    assert attempt["request"] == request and json.loads(attempt["raw_response"]) == body
+                    assert attempt["request"] == request
+                    if flow == "malformed-json" and slot == 0:
+                        assert "private-json-sentinel" in attempt["raw_response"]
+                    else: assert json.loads(attempt["raw_response"]) == body
+                    assert attempt["response_complete"] is True and attempt["response_reader_joined"] is True
+                    assert attempt["response_headers_b64"] and attempt["response_body_b64"]
+                    assert base64.b64decode(attempt["response_body_b64"]).decode() == attempt["raw_response"]
                     assert attempt["prompt"][0]["content"] == request["system"]
                     assert attempt["prompt"][1]["content"] == request["messages"][0]["content"]
-                    if "model" in body: assert attempt["model"] == "fixture/served"
+                    if "model" in body and not (flow == "malformed-json" and slot == 0):
+                        assert attempt["model"] == "fixture/served"
+                    if "usage" in body and not (flow == "malformed-json" and slot == 0):
+                        assert attempt["input_tokens"] == 17 and attempt["output_tokens"] == 5
+                    if flow == "invalid-token-types" and slot == 0:
+                        assert attempt["prompt_token_ids"] is None and attempt["behavior_logprobs"] is None
+                    if flow == "large-metadata":
+                        assert attempt["prompt_token_ids"] == list(range(32768))
+                        assert attempt["sampled_token_ids"] == [3, 4] and attempt["behavior_logprobs"] == [-0.5, -0.3]
                     if flow == "greedy-tokens":
                         assert attempt["sampled_token_ids"] == [3, 4] and attempt["behavior_logprobs"] is None
                 if decision["action_status"] == "accepted":
@@ -128,10 +150,12 @@ for flow in ("accepted", "invalid", "sampled", "greedy-null", "greedy-tokens", "
                 else: assert decision["selected_attempt_id"] is None
             assert seen == set(calls)
             public = (output / "replay.json").read_text() + "".join((output / p).read_text() for p in ["game.log", *(f"player{i}.log" for i in range(6))])
-            for secret in ("private-guidance-fixture", "private-invalid-response", "private-provider-error"):
+            for secret in ("private-guidance-fixture", "private-invalid-response", "private-provider-error", "private-json-sentinel", "private-schema-sentinel", "private-token-sentinel", "private-probability-sentinel"):
                 assert secret not in public
-            if flow in {"invalid", "provider-error"}:
+            if flow == "invalid":
                 assert any(d["action_status"] == "fallback" and len(d["attempts"]) == 2 for d in decisions)
+            if flow in {"provider-error", "malformed-json", "malformed-schema", "invalid-token-types"}:
+                assert any(d["action_status"] == "fallback" and len(d["attempts"]) == 1 for d in decisions)
             print(flow, len(decisions), "macros", len(calls), "native fixture joins", flush=True)
         finally:
             for process in processes:

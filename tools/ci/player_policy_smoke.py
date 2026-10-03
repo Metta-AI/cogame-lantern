@@ -24,6 +24,7 @@ def main(game_bin: str, player_bin: str) -> None:
             assert self.path == "/v1/messages"
             calls.append(("prompt", 0, ()))
             response = {
+                "model": "fixture/served",
                 "content": [
                     {
                         "type": "text",

@@ -1,18 +1,13 @@
-## Hosted calls must reach the native sidecar without provider credentials.
+## Retired provider credentials must never activate production inference.
 include "../src/lantern/llm"
 
 block:
-  putEnv("COWORLD_LLM_ENDPOINT", "http://127.0.0.1:9100/")
-  putEnv("COWORLD_LLM_MODEL", "anthropic/claude-sonnet-4.6")
+  delEnv("COWORLD_LLM_ENDPOINT")
   putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://retired.invalid")
-  putEnv("ANTHROPIC_API_KEY", "local-key-must-not-be-used")
-  let client = newLlmClient()
-  for slot in 0 .. 1:
-    let request = client.requestFor("rules", "private view", slot)
-    doAssert request.url == "http://127.0.0.1:9100/v1/messages"
-    doAssert request.headers["X-Coworld-Player-Slot"] == $slot
-    let body = parseJson(request.body)
-    doAssert body["model"].getStr() == "anthropic/claude-sonnet-4.6"
-    doAssert not body.hasKey("anthropic_version")
-    doAssert not body.hasKey("output_config")
-  echo "hosted sidecar routing and seat attribution passed"
+  putEnv("AWS_BEARER_TOKEN_BEDROCK", "retired-fixture-secret")
+  putEnv("ANTHROPIC_API_KEY", "retired-fixture-secret")
+  doAssert newLlmClient().disabled
+  putEnv("COWORLD_LLM_ENDPOINT", "http://127.0.0.1:9100/")
+  doAssert not newLlmClient().disabled
+  doAssert newLlmClient().sidecarEndpoint == "http://127.0.0.1:9100"
+  echo "Only an explicit native sidecar endpoint activates inference"

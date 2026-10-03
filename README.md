@@ -23,8 +23,7 @@ coworld upload-policy coworld-lantern:latest --name my-lantern \
   --secret-env PLAYER_PROMPT="Build a warren, then vanish into it..."
 ```
 
-Two scripted baselines ship in the same image: `PLAYER_SCRIPTED=warden` and `PLAYER_SCRIPTED=moth`. Without model
-credentials, a model seat reports fallback and the game plays `warden`.
+Two scripted baselines ship in the same image: `PLAYER_SCRIPTED=warden` and `PLAYER_SCRIPTED=moth`. Without `COWORLD_LLM_ENDPOINT`, a model seat reports fallback and the game plays `warden`.
 
 ## The shape of a match
 
@@ -139,8 +138,9 @@ lantern-posttrain /private/lantern-corpus 10 1 sprint SOURCE_GAME_VERSION
 ```
 
 The local teacher consumes only each exact private seat view. Its exports include
-private canonical trajectories and train/validation rows split by seed; they have
-no invented platform call IDs. Numeric bridge mode remains a separate action
+private canonical trajectories only. Serving metadata remains null. The shared
+reviewed importer owns seed-family splits and supervised rows. No platform call IDs
+are invented. Numeric bridge mode remains a separate action
 interface. Language rejection returns the exact hosted retry prompt once, followed
 by the actual game-owned fallback after a second rejection. Fallbacks are excluded
 from supervised targets. Keep corpora outside this checkout and review their

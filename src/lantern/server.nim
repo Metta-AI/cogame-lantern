@@ -9,31 +9,20 @@
 ##   WS  /player?slot=N&token=T   - the player protocol
 ##   WS  /global                  - the spectator snapshot stream
 ##
-## Player protocol (lantern.player.v2), all JSON text frames:
+## Player protocol (lantern.player.v3), all JSON text frames:
 ##   player -> game: {"type":"register","kind":...,"scripted":...,"policy":...}
 ##   game -> player: {"type":"welcome",...}
-##                   {"type":"decision","view":...}
+##                   {"type":"decision","decision_id":...,"observation":...}
 ##   player -> game: {"type":"action","order":...}
 ##                   {"type":"turn","turn":N,"tick":T,"half":H,"act":...,
 ##                    "role":...,"view":{...},"order_source":...}
 ##                   {"done":true,"result":{...}}
 
-import std/[json, locks, monotimes, os, sets, strutils, options, tables, times]
-import bitworld/[runtime, decision_trajectory]
-import curly
+import std/[base64, json, locks, math, monotimes, os, sets, strutils, options, sysrand, tables, times]
+import bitworld/[runtime, decision_trajectory, artifact_runtime, native_http, native_stop]
 import mummy, mummy/routers
 import types, arena, sim, rules, control, orders, decision,
-       render, replay, roster, broadcast, events, labels, training_capture
-
-const
-  DoneBroadcastMs = 3_000
-    ## Bounded wait for the final frame to land before the artifacts are
-    ## written: the hosted worker tears player pods down as soon as
-    ## results.json exists.
-  PlayBudgetFraction = 60
-    ## Percent of the platform's episode timeout spent playing. An episode
-    ## that outruns the timeout is discarded whole, so lantern settles early
-    ## rather than overrunning.
+       render, replay, roster, broadcast, events, labels, training_capture, llm
 
 type
   GameState = object
@@ -42,8 +31,18 @@ type
     roster: Roster
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
-    actionReplies: Table[int, string]
-    attemptEvidence: Table[int, JsonNode]
+    pendingActions: Table[string, tuple[payload: JsonNode, receivedAt: MonoTime]]
+    pendingAttempts: Table[string, JsonNode]
+    completedAttempts: Table[string, JsonNode]
+    decisionSeats: Table[string, int]
+    decisionIssuedAt, decisionDeadlines: Table[string, MonoTime]
+    decisionObservations: Table[string, JsonNode]
+    decisionRetries: Table[string, bool]
+    latestDecisions: Table[int, string]
+    stoppedSlots, registeredSlots: HashSet[int]
+    stopping: bool
+    stopId: string
+    stopIssuedAt, acknowledgementDeadline, episodeDeadline: MonoTime
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
@@ -85,19 +84,13 @@ proc assertFileUri*(name: string) =
     name & " must be a file:// URI (got " & value.split("://")[0] &
     "://...); lantern refuses to stream telemetry off-box")
 
-proc writeArtifact(uri, data, contentType, methodEnv: string) =
-  if uri.len == 0:
-    return
-  let httpMethod = getEnv(methodEnv, "PUT").toUpperAscii()
-  if uri.isHttpCogameUri() and httpMethod == "POST":
-    let curl = newCurly()
-    var headers: HttpHeaders
-    headers["content-type"] = contentType
-    let response = curl.post(uri, headers, data, 60)
-    if response.code < 200 or response.code >= 300:
-      raise newException(IOError, "artifact POST failed: " & $response.code)
-  else:
-    writeCogameUri(uri, data, contentType, methodEnv)
+proc writeArtifact(uri, data, contentType, methodEnv: string, deadline: MonoTime) =
+  if uri.len == 0: return
+  let httpMethod = case getEnv(methodEnv, "PUT").toUpperAscii()
+    of "PUT": ahPut
+    of "POST": ahPost
+    else: raise newException(LanternError, "artifact method must be PUT or POST")
+  writeCogameArtifact(uri, data, contentType, "lantern", deadline, httpMethod)
 
 proc connectedFlags(gs: GameState): seq[bool] =
   for slot in 0 ..< gs.config.numAgents:
@@ -130,50 +123,56 @@ proc pushTurnFrames(gs: GameState, sources: Table[int, string]) =
 
 proc exchangeDecisions(requests: seq[JsonNode], timeoutMs: int):
     seq[string] {.gcsafe.} =
-  ## Every private view leaves before the shared deadline starts.
+  ## All private requests leave before waiting on the same absolute budget.
   result = newSeq[string](requests.len)
-  var sockets = newSeq[WebSocket](requests.len)
-  var connected = newSeq[bool](requests.len)
   {.gcsafe.}:
+    if interruptionRequested():
+      for position in 0 ..< requests.len:
+        result[position] = $(%*{"type": "attempt_interrupted", "training_attempt": nil})
+      return
+    let deadline = min(state.episodeDeadline - initDuration(seconds = 5),
+      getMonoTime() + initDuration(milliseconds = timeoutMs))
     withLock stateLock:
-      for position, request in requests:
+      for request in requests:
         let slot = request["slot"].getInt()
-        if state.playerSockets.hasKey(slot):
-          sockets[position] = state.playerSockets[slot]
-          connected[position] = true
-          state.actionReplies.del(slot)
-          state.attemptEvidence.del(slot)
-    for position, socket in sockets:
-      if connected[position]:
-        socket.send($requests[position])
-    let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
-    while getMonoTime() < deadline:
+        let id = request["decision_id"].getStr()
+        state.decisionSeats[id] = slot
+        state.decisionIssuedAt[id] = getMonoTime()
+        state.decisionDeadlines[id] = deadline
+        state.decisionObservations[id] = copy(request["observation"])
+        state.decisionRetries[id] = request["attempt"].getInt() > 1
+        state.latestDecisions[slot] = id
+        let outbound = copy(request)
+        outbound["transport"]["budget_ms"] = %max(0, (deadline - getMonoTime()).inMilliseconds)
+        if state.playerSockets.hasKey(slot): state.playerSockets[slot].send($outbound)
+    while getMonoTime() < deadline and not interruptionRequested():
       var pending = false
       withLock stateLock:
         for position, request in requests:
-          if not connected[position] or result[position].len > 0:
-            continue
-          let slot = request["slot"].getInt()
-          if state.actionReplies.hasKey(slot):
-            let raw = state.actionReplies[slot]
-            state.actionReplies.del(slot)
-            if parseJson(raw){"id"}.getInt() == request["id"].getInt():
-              result[position] = raw
-            else:
-              pending = true
-          else:
-            pending = true
-      if not pending:
-        break
+          if result[position].len > 0: continue
+          let id = request["decision_id"].getStr()
+          if state.pendingActions.hasKey(id):
+            let received = state.pendingActions[id]
+            state.pendingActions.del(id)
+            if received.receivedAt >= state.decisionIssuedAt[id] and received.receivedAt <= deadline:
+              result[position] = $received.payload
+            else: pending = true
+          else: pending = true
+      if not pending: break
       sleep(10)
     withLock stateLock:
       for position, request in requests:
-        let slot = request["slot"].getInt()
-        if result[position].len == 0 and state.attemptEvidence.hasKey(slot):
-          let evidence = state.attemptEvidence[slot]
-          if evidence["id"] == request["id"]:
-            result[position] = $(%*{"type": "attempt_timeout",
-              "training_attempt": evidence["training_attempt"]})
+        let id = request["decision_id"].getStr()
+        if result[position].len == 0:
+          let kind = if interruptionRequested(): "attempt_interrupted" else: "attempt_timeout"
+          if state.completedAttempts.hasKey(id):
+            result[position] = $(%*{"type": kind,
+              "training_attempt": state.completedAttempts[id]})
+          elif state.pendingAttempts.hasKey(id):
+            result[position] = $(%*{"type": kind,
+              "training_attempt": state.pendingAttempts[id]})
+          elif interruptionRequested():
+            result[position] = $(%*{"type": kind, "training_attempt": nil})
 
 # ---------------------------------------------------------------------------
 # The turn loop.
@@ -199,10 +198,9 @@ proc activeSeats*(sim: Sim, half: int, act: Act): seq[int] =
       continue
     result.add(slot)
 
-proc nowMs(): int = int(epochTime() * 1000.0)
-
 proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
+    defer: gameServer.close()
     let config = state.config
     let trajectoryUri = getEnv(CogameSaveTrajectoryUriEnv)
     let trajectory = if trajectoryUri.len > 0:
@@ -210,12 +208,14 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         "lantern", getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION"))
       else: nil
     var pendingMacros: seq[PendingMacro]
-    let startMs = nowMs()
-    let connectDeadline = startMs + config.playerConnectTimeoutMs
-    while nowMs() < connectDeadline:
+    var completedMacros: seq[CompletedMacro]
+    let start = getMonoTime()
+    let connectDeadline = min(state.episodeDeadline - initDuration(seconds = 5),
+      start + initDuration(milliseconds = config.playerConnectTimeoutMs))
+    while getMonoTime() < connectDeadline and not interruptionRequested():
       var all = false
       withLock stateLock:
-        all = state.playerSockets.len >= config.numAgents
+        all = state.registeredSlots.len >= config.numAgents
       if all:
         break
       sleep(200)
@@ -235,19 +235,13 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## the warden baseline for the whole match. Report the LOWEST offending
       ## slot only, as paintbot's declarePlayerFailure does.
       echo "lantern: seat ", missing[0], " never connected; playing warden"
-      try:
-        writeArtifact(getEnv("COGAME_PLAYER_FAILURE_URI"),
-          $ %*{"slot": missing[0], "reason": "player never connected",
-               "slots": missing}, "application/json",
-          "COGAME_PLAYER_FAILURE_METHOD")
-      except CatchableError as error:
-        echo "lantern: could not report the player failure: ", error.msg
 
     var reason = erComplete
     var rule = edFullTime
     var guardEngaged = false
     let total = totalTicks(config)
-    let wallDeadline = startMs + config.wallClockBudgetMs
+    let wallDeadline = min(state.episodeDeadline - initDuration(seconds = 5),
+      start + initDuration(milliseconds = config.wallClockBudgetMs))
 
     try:
       while true:
@@ -256,7 +250,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           done = state.sim.tick >= total
         if done:
           break
-        if nowMs() > wallDeadline:
+        if interruptionRequested() or getMonoTime() > wallDeadline:
           echo "lantern: wall-clock budget reached at tick ", state.sim.tick
           reason = erDeadline
           rule = edWallClock
@@ -291,12 +285,12 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         if isTurn:
           if trajectoryUri.len > 0:
             withLock stateLock:
-              trajectory.recordMacros(state.sim, pendingMacros)
+              completedMacros.add(collectMacros(state.sim, pendingMacros))
           ## The budget guard settles early rather than overrunning: once two
           ## more full turn budgets would not fit, every remaining turn is
           ## played on the scripted layer (well under a millisecond a turn),
           ## so the episode ends complete/full_time instead of deadline.
-          let remainingMs = wallDeadline - nowMs()
+          let remainingMs = max(0, (wallDeadline - getMonoTime()).inMilliseconds.int)
           if not guardEngaged and remainingMs < 2 * config.turnBudgetMs:
             guardEngaged = true
             withLock stateLock:
@@ -309,6 +303,10 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             if seats.len == 0: @[]
             else: decideAll(simRef, half, seats, scripted,
                             guardEngaged, exchangeDecisions)
+          if interruptionRequested():
+            reason = erDeadline
+            rule = edWallClock
+            break
           var sources: Table[int, string]
           withLock stateLock:
             let phase = phaseAt(config, state.sim.tick)
@@ -357,14 +355,38 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       reason = erFault
       rule = edHostError
 
+    let cleanupDeadline = min(state.episodeDeadline, getMonoTime() + initDuration(seconds = 5))
+    var targets: seq[int]
+    withLock stateLock:
+      state.stopping = true
+      var nonce: array[16, byte]
+      doAssert urandom(nonce), "OS entropy unavailable for stop identity"
+      for value in nonce: state.stopId.add(value.toHex(2))
+      state.stopIssuedAt = getMonoTime()
+      state.acknowledgementDeadline = cleanupDeadline - initDuration(seconds = 1)
+      for slot in state.registeredSlots:
+        targets.add(slot)
+        if not state.playerSockets.hasKey(slot): continue
+        let id = if state.latestDecisions.hasKey(slot): %state.latestDecisions[slot] else: newJNull()
+        state.playerSockets[slot].send($(%*{"type": "stop", "stop_id": state.stopId,
+          "decision_id": id,
+          "reason": (if interruptionRequested(): "interrupted" elif reason == erComplete: "terminal" else: "episode_deadline"),
+          "cleanup_budget_ms": max(0, (state.acknowledgementDeadline - getMonoTime()).inMilliseconds)}))
+    while getMonoTime() < state.acknowledgementDeadline:
+      var acknowledged = true
+      withLock stateLock:
+        for slot in targets:
+          if slot notin state.stoppedSlots: acknowledged = false
+      if acknowledged: break
+      sleep(10)
+
     var results: JsonNode
     var replayData: string
+    var joined = true
     withLock stateLock:
-      if state.finished:
-        return
       state.finished = true
       if trajectoryUri.len > 0:
-        trajectory.recordMacros(state.sim, pendingMacros, terminal = true)
+        completedMacros.add(collectMacros(state.sim, pendingMacros, terminal = true))
       state.sim.endReason = reason
       state.sim.endRule = rule
       let kinds = state.roster.policyKinds()
@@ -377,70 +399,74 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var fracMicro: seq[int]
       for value in results["team_hidden_frac"]:
         fracMicro.add(int(value.getFloat() * 1_000_000.0 + 0.5))
-      let winner = (if results["winner"].kind == JNull: -1
-                    else: results["winner"].getInt())
-      state.sim.emit(endEvent(state.sim.tick, reason, rule, scoresMilli,
-                              fracMicro, winner))
+      let winner = (if results["winner"].kind == JNull: -1 else: results["winner"].getInt())
+      state.sim.emit(endEvent(state.sim.tick, reason, rule, scoresMilli, fracMicro, winner))
+      var cleanup = newJObject()
+      for slot in targets:
+        cleanup[$slot] = %(if slot in state.stoppedSlots: "acknowledged" else: "unresolved")
+        if slot notin state.stoppedSlots: joined = false
       if trajectoryUri.len > 0:
+        var represented = initHashSet[string]()
+        for completed in completedMacros.mitems:
+          for attempt in completed.pending.decision.attempts.mitems:
+            let id = attempt.attemptId[0 ..< attempt.attemptId.rfind('-')]
+            represented.incl(id)
+            if completed.pending.decision.selectedAttemptId == some(attempt.attemptId): continue
+            if state.completedAttempts.hasKey(id):
+              var received = readAttemptEvidence(state.completedAttempts[id])
+              if received.origin in {aoTeacher, aoHuman}: received.origin = aoUnknown
+              received.accepted = attempt.accepted
+              received.parsedAction = attempt.parsedAction
+              received.rejectionReason = attempt.rejectionReason
+              attempt = received
+          trajectory.recordMacro(completed)
+        # A stop or owner failure can happen after issuance but before order installation.
+        # These attempts have no executed action or invented control interval.
+        for id, slot in state.decisionSeats:
+          if id in represented: continue
+          var attempt = if state.completedAttempts.hasKey(id):
+            readAttemptEvidence(state.completedAttempts[id])
+            elif state.pendingAttempts.hasKey(id): readAttemptEvidence(state.pendingAttempts[id])
+            else: newDecisionAttempt(id & "-unknown", "external", aoUnknown)
+          if attempt.origin in {aoTeacher, aoHuman}: attempt.origin = aoUnknown
+          attempt.accepted = false
+          attempt.rejectionReason = some("episode stopped before engine order installation")
+          trajectory.recordDecision(id, $slot, state.decisionObservations[id], @[attempt],
+            none(string), newJNull(), asMissing, terminal = true)
         var outcomes = newJObject()
         for slot in 0 ..< config.numAgents: outcomes[$slot] = results["scores"][slot]
-        trajectory.finish((if reason == erComplete: esCompleted
-          elif reason == erDeadline: esTruncated else: esFailed), results, outcomes)
+        let status = if not joined or interruptionRequested() or reason == erDeadline: esTruncated
+          elif reason == erComplete: esCompleted else: esFailed
+        let privateOutcome = copy(results)
+        privateOutcome["player_cleanup"] = cleanup
+        trajectory.finish(status, privateOutcome,
+          if status == esCompleted: outcomes else: newJNull())
       state.lastResults = results
       replayData = $buildReplay(state.sim, kinds, results)
-      let final = %*{"done": true, "result": results}
-      for slot, socket in state.playerSockets:
-        socket.send($final)
-      state.broadcastGlobalLocked()
-
-    ## Bounded wait for the final frame to land, then the artifacts, in the
-    ## order the platform expects: replay first, results last, because the
-    ## worker tears the pod down the moment results.json exists.
-    let doneDeadline = nowMs() + DoneBroadcastMs
-    while nowMs() < doneDeadline:
-      var open = 0
-      withLock stateLock:
-        open = state.playerSockets.len
-      if open == 0:
-        break
-      sleep(100)
+      if joined and not interruptionRequested():
+        let final = %*{"done": true, "result": results}
+        for slot, socket in state.playerSockets: socket.send($final)
+        state.broadcastGlobalLocked()
 
     if trajectoryUri.len > 0:
-      trajectory.writeEventsToUri(trajectoryUri)
-    echo "lantern: writing replay and results (", reason, "/", rule, ")"
-    try:
+      let httpMethod = case getEnv("COGAME_SAVE_TRAJECTORY_METHOD", "PUT")
+        of "PUT": ahPut
+        of "POST": ahPost
+        else: raise newException(LanternError, "trajectory method must be PUT or POST")
+      trajectory.writeTrajectoryArtifact(trajectoryUri, cleanupDeadline, httpMethod)
+    if joined and not interruptionRequested():
+      if missing.len > 0:
+        writeArtifact(getEnv("COGAME_PLAYER_FAILURE_URI"),
+          $ %*{"slot": missing[0], "reason": "player never connected", "slots": missing},
+          "application/json", "COGAME_PLAYER_FAILURE_METHOD", cleanupDeadline)
       writeArtifact(runtimeConfig.replayUri, replayData, "application/json",
-                    "COGAME_SAVE_REPLAY_METHOD")
-    except CatchableError as error:
-      echo "lantern: replay write failed: ", error.msg
-    try:
+                    "COGAME_SAVE_REPLAY_METHOD", cleanupDeadline)
       writeArtifact(runtimeConfig.resultsUri, $results, "application/json",
-                    "COGAME_RESULTS_METHOD")
-    except CatchableError as error:
-      echo "lantern: results write failed: ", error.msg
-    ## SHUTDOWN GRACE. Do not vanish the instant the artifacts are written.
-    ##
-    ## A lantern certification episode is six scripted seats over 1440 ticks -
-    ## about two seconds of wall clock. The platform's episode runner connects
-    ## its spectator viewer to /global and then BLOCKS, holding the socket
-    ## open while the player pods start, before it pings with a 2 s deadline
-    ## (`_require_websocket_pong`). Exiting as soon as the episode ends closes
-    ## that socket underneath the ping, and hosted certification fails with
-    ## "Game websocket did not answer a WebSocket Ping with Pong: ...: no
-    ## close frame received or sent" - which is a startup race, not a game
-    ## fault, and it cost lantern 0.1.3's hosted certification.
-    ##
-    ## So keep serving /healthz and /global for a bounded grace, then exit.
-    ## The runner is waiting for this process to exit and gives it the whole
-    ## episode timeout to do so, so twenty seconds is free.
-    let graceDeadline = nowMs() + max(0, config.shutdownGraceMs)
-    echo "lantern: episode complete; serving for ",
-      config.shutdownGraceMs div 1000, "s more so a late spectator or a ",
-      "certification ping still finds the socket alive"
-    while nowMs() < graceDeadline:
-      sleep(200)
-    echo "lantern: shutting down"
-    quit(0)
+                    "COGAME_RESULTS_METHOD", cleanupDeadline)
+      ## Preserve the real spectator/ping grace without resetting artifact deadlines.
+      let graceDeadline = min(state.episodeDeadline,
+        getMonoTime() + initDuration(milliseconds = max(0, config.shutdownGraceMs)))
+      while getMonoTime() < graceDeadline and not interruptionRequested(): sleep(50)
 
 var gameThread: Thread[RuntimeConfig]
 
@@ -545,19 +571,14 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
       slot = parseInt(slotText)
     except ValueError:
       discard
-    var authorised = false
-    var duplicate = false
     withLock stateLock:
-      authorised = state.roster.authorised(slot, token)
-      duplicate = state.playerSockets.hasKey(slot)
-    if not authorised:
-      request.respond(403)
-      return
-    if duplicate:
-      request.respond(409)
-      return
-    let websocket = request.upgradeToWebSocket()
-    withLock stateLock:
+      if not state.roster.authorised(slot, token):
+        request.respond(403)
+        return
+      if state.started or state.stopping or state.finished or state.playerSockets.hasKey(slot):
+        request.respond(409)
+        return
+      let websocket = request.upgradeToWebSocket()
       state.playerSockets[slot] = websocket
       state.socketSlots[websocket] = slot
       state.roster.seats[slot].connected = true
@@ -565,7 +586,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
       echo "lantern: player slot ", slot, " connected (",
         state.playerSockets.len, "/", state.config.numAgents, ")"
       websocket.send($ %*{
-        "type": "welcome", "protocol": "lantern.player.v2", "slot": slot,
+        "type": "welcome", "protocol": "lantern.player.v3", "slot": slot,
         "alias": aliasOfSlot(slot), "team": $teamOfSlot(slot),
         "hides_in_half": hidHalfOfSlot(slot),
         "turns": totalTurns(state.config)})
@@ -588,16 +609,40 @@ proc globalUpgradeHandler(request: Request) {.gcsafe.} =
       websocket.send($snapshotJson(state.sim, state.playerNames(),
                                    state.started, state.connectedFlags()))
 
-proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
-                      message: Message) {.gcsafe.} =
+proc validateAttemptProgress(before, evidence: JsonNode) =
+  for key in ["prompt", "request", "decoder", "policy"]:
+    if evidence[key] != before[key]:
+      raise newException(ValueError, "native progress changed started request evidence")
+  if before["latency_ms"].kind != JNull and evidence != before:
+    raise newException(ValueError, "finished native evidence is immutable")
+  for key in ["response_body_b64", "response_headers_b64"]:
+    if before[key].kind != JNull and
+        (evidence[key].kind != JString or
+          not decode(evidence[key].getStr()).startsWith(decode(before[key].getStr()))):
+      raise newException(ValueError, "received native bytes cannot be rewritten")
+  if before["response_complete"] == %true:
+    for key in ["response_complete", "response_body_b64", "response_headers_b64"]:
+      if evidence[key] != before[key]:
+        raise newException(ValueError, "complete native bytes are immutable")
+  for key in ["http_status", "response_headers", "platform_call_id", "provider_request_id",
+      "model_identity", "tokenizer_identity", "chat_template_sha256"]:
+    if before[key].kind != JNull and evidence[key] != before[key]:
+      raise newException(ValueError, "received native identity is immutable")
+
+proc websocketHandler(
+  websocket: WebSocket,
+  event: WebSocketEvent,
+  message: Message
+) {.gcsafe.} =
   {.gcsafe.}:
     case event
     of OpenEvent:
       discard
     of MessageEvent:
-      ## mummy hands Ping frames to the application; the platform's certifier
-      ## pings /global to check the game is alive, so an unanswered ping
-      ## fails certification.
+      let receivedAt = getMonoTime()
+      ## mummy hands Ping frames to the application instead of answering
+      ## them itself; the platform's certifier pings /global to check the
+      ## game is alive, so an unanswered ping fails certification.
       if message.kind == Ping:
         websocket.send(message.data, Pong)
         return
@@ -610,32 +655,139 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
         return
       try:
         let payload = parseJson(message.data)
-        if payload{"type"}.getStr() == "register":
+        let frameType = payload["type"].getStr()
+        if frameType == "register":
           withLock stateLock:
+            if state.started or state.stopping or state.finished or state.roster.seats[slot].registered:
+              raise newException(ValueError, "registration is closed")
             state.roster.applyRegister(slot, payload)
-            echo "lantern: slot ", slot, " registered (",
-              policyKind(state.roster.seats[slot]), ")"
-        elif payload{"type"}.getStr() == "attempt_started":
+            state.registeredSlots.incl(slot)
+        elif frameType in ["attempt_started", "action"]:
+          let id = payload["decision_id"].getStr()
+          var evidence = newJNull()
+          if payload["training_attempt"].kind != JNull:
+            evidence = payload["training_attempt"]
+            let attempt = readAttemptEvidence(evidence)
+            if attempt.attemptId != id & "-model":
+              raise newException(ValueError, "attempt identity differs from issued decision")
           withLock stateLock:
-            state.attemptEvidence[slot] = copy(payload)
-        elif payload{"type"}.getStr() == "action":
-          let actionId = payload{"id"}
-          if not actionId.isNil and actionId.kind == JInt:
-            withLock stateLock:
-              state.actionReplies[slot] = message.data
+            if state.finished: return
+            if not state.decisionSeats.hasKey(id) or state.decisionSeats[id] != slot:
+              raise newException(ValueError, "decision does not belong to authenticated seat")
+            if receivedAt < state.decisionIssuedAt[id]:
+              raise newException(ValueError, "player frame preceded issued decision")
+            if evidence.kind == JObject:
+              if frameType == "action" and readAttemptEvidence(evidence).origin == aoModel and
+                  not state.pendingAttempts.hasKey(id):
+                raise newException(ValueError, "native completion has no recorded request start")
+              if state.pendingAttempts.hasKey(id):
+                validateAttemptProgress(state.pendingAttempts[id], evidence)
+              if frameType == "attempt_started":
+                let attempt = readAttemptEvidence(evidence)
+                if attempt.origin == aoModel:
+                  let view = state.decisionObservations[id]
+                  let retry = state.decisionRetries[id]
+                  let suffix = userPrompt(view, "", retry)
+                  let user = attempt.request["messages"][0]["content"].getStr()
+                  if not user.endsWith(suffix):
+                    raise newException(ValueError, "native request differs from issued private observation")
+                  let prefix = user[0 ..< user.len - suffix.len]
+                  var guidance = ""
+                  if prefix.len > 0:
+                    if not prefix.endsWith("\n\n"):
+                      raise newException(ValueError, "native guidance differs from production renderer")
+                    guidance = prefix[0 ..< prefix.len - 2]
+                  let expected = %*[{"role": "system", "content": SystemPrompt},
+                    {"role": "user", "content": userPrompt(view, guidance, retry)}]
+                  if attempt.prompt != expected or attempt.request["system"] != %SystemPrompt or
+                      attempt.request["messages"] != %*[{"role": "user", "content": user}]:
+                    raise newException(ValueError, "native prompt differs from production renderer")
+                state.pendingAttempts[id] = evidence
+              else:
+                if state.completedAttempts.hasKey(id) and state.completedAttempts[id] != evidence:
+                  raise newException(ValueError, "completion evidence is immutable")
+                state.completedAttempts[id] = evidence
+            if frameType == "action":
+              let source = payload["source"].getStr()
+              if source notin ["llm", "external", "fallback"]:
+                raise newException(ValueError, "unknown action source")
+              if source == "llm" and evidence.kind == JNull:
+                raise newException(ValueError, "native action has no attempt evidence")
+              if evidence.kind == JObject and source != "fallback":
+                let attempt = readAttemptEvidence(evidence)
+                if attempt.origin == aoModel:
+                  if attempt.responseComplete != some(true) or
+                      attempt.responseReaderJoined != some(true) or
+                      attempt.httpStatus != some(200) or attempt.rejectionReason.isSome:
+                    raise newException(ValueError, "native completion is not complete and joined")
+                  let body = parseJson(attempt.rawResponse.getStr())
+                  var text = ""
+                  for contentBlock in body["content"]:
+                    if contentBlock["type"].getStr() == "text": text.add(contentBlock["text"].getStr())
+                  if attempt.response != %text or attempt.model != some(body["model"].getStr()):
+                    raise newException(ValueError, "native body differs from completion response or model")
+              state.pendingActions[id] = (payload: payload, receivedAt: receivedAt)
+        elif frameType == "stopped":
+          if payload["worker_status"].getStr() notin ["joined", "no_active_call"]:
+            raise newException(ValueError, "unknown stopped worker status")
+          if payload["attempts"].kind != JArray:
+            raise newException(ValueError, "stop attempts must be an array")
+          withLock stateLock:
+            if state.finished: return
+            let expected = if state.latestDecisions.hasKey(slot):
+              %state.latestDecisions[slot] else: newJNull()
+            if payload["decision_id"].kind != JNull:
+              let id = payload["decision_id"].getStr()
+              if not state.decisionSeats.hasKey(id) or state.decisionSeats[id] != slot:
+                raise newException(ValueError, "stop acknowledgement belongs to another seat")
+              for evidence in payload["attempts"]:
+                let attempt = readAttemptEvidence(evidence)
+                if attempt.attemptId != id & "-model":
+                  raise newException(ValueError, "acknowledged attempt belongs to another decision")
+                if receivedAt < state.decisionIssuedAt[id]:
+                  raise newException(ValueError, "joined evidence preceded issued decision")
+                if attempt.origin == aoModel and not state.pendingAttempts.hasKey(id):
+                  raise newException(ValueError, "joined native evidence has no recorded request start")
+                if state.pendingAttempts.hasKey(id):
+                  validateAttemptProgress(state.pendingAttempts[id], evidence)
+                if state.completedAttempts.hasKey(id) and state.completedAttempts[id] != evidence:
+                  raise newException(ValueError, "stop changed completed evidence")
+                state.completedAttempts[id] = evidence
+            elif payload["attempts"].len != 0:
+              raise newException(ValueError, "no-active-call acknowledgement has attempt evidence")
+            # Confirm immutable fact receipt before the sender tears down its socket.
+            # This does not grant stop credit or platform receipt authority.
+            if state.playerSockets.hasKey(slot) and state.playerSockets[slot] == websocket:
+              websocket.send($(%*{"type": "evidence_received",
+                "decision_id": payload["decision_id"], "stop_id": payload["stop_id"]}))
+            # Preserve genuine joined transport facts even when the player stops first.
+            # They do not grant acknowledgement credit before this engine's stop window.
+            if payload["decision_id"] != expected:
+              raise newException(ValueError, "stop acknowledgement differs from latest decision")
+            if not state.stopping:
+              raise newException(ValueError, "stop acknowledgement preceded engine stop")
+            if receivedAt < state.stopIssuedAt or receivedAt > state.acknowledgementDeadline:
+              raise newException(ValueError, "stop acknowledgement is outside cleanup window")
+            if not payload.hasKey("stop_id") or payload["stop_id"] != %state.stopId:
+              raise newException(ValueError, "stop acknowledgement differs from engine stop identity")
+            for evidence in payload["attempts"]:
+              if readAttemptEvidence(evidence).responseReaderJoined == some(false):
+                raise newException(ValueError, "stop retains an unjoined native response reader")
+            state.stoppedSlots.incl(slot)
+        else:
+          raise newException(ValueError, "unknown player frame")
       except CatchableError as error:
-        echo "lantern: ignoring bad private player frame"
+        echo "lantern: ignoring invalid private player frame"
     of ErrorEvent:
       discard
     of CloseEvent:
       withLock stateLock:
         if websocket in state.socketSlots:
           let slot = state.socketSlots[websocket]
-          state.socketSlots.del(websocket)
+          # Parallel callbacks may dispatch an already-received final frame after close.
+          # Keep its authenticated owner binding until this episode seals.
           if state.playerSockets.getOrDefault(slot) == websocket:
             state.playerSockets.del(slot)
-            state.actionReplies.del(slot)
-          if slot >= 0 and slot < state.roster.seats.len:
             state.roster.seats[slot].connected = false
         state.globalSockets.excl(websocket)
 
@@ -662,18 +814,33 @@ proc runReplayServer*(runtimeConfig: RuntimeConfig) =
   ## fed straight from S3.
   replayPayloadGlobal = runtimeConfig.replay
   let router = buildRouter(replayMode = true)
-  gameServer = newServer(router, websocketHandler, workerThreads = 4)
+  gameServer = newServer(router, websocketHandler, workerThreads = 4, maxMessageLen = 16 * 1024 * 1024)
   echo "lantern: replay mode on ", runtimeConfig.host, ":", runtimeConfig.port
   gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host)
 
 proc prepareState*(config: GameConfig) =
   ## Everything runGameServer does before it opens a socket. Exposed so
-  ## tests/test_server.nim can exercise the websocket contract without a game
-  ## thread that would `quit(0)` out from under the test process.
+  ## tests/test_server.nim can exercise the websocket contract without an episode
+  ## owner closing the shared server.
   state.config = config
   state.sim = newSim(config, loadMapSpec(config.mapPath))
   state.roster = initRoster(config)
-  state.actionReplies = initTable[int, string]()
+  state.pendingActions.clear()
+  state.pendingAttempts.clear()
+  state.completedAttempts.clear()
+  state.decisionSeats.clear()
+  state.decisionIssuedAt.clear()
+  state.decisionDeadlines.clear()
+  state.decisionObservations.clear()
+  state.decisionRetries.clear()
+  state.latestDecisions.clear()
+  state.stoppedSlots.clear()
+  state.registeredSlots.clear()
+  state.playerSockets.clear()
+  state.socketSlots.clear()
+  state.globalSockets.clear()
+  state.stopping = false
+  state.stopId = ""
   state.llmTurns = newSeq[int](config.numAgents)
   state.fallbackTurns = newSeq[int](config.numAgents)
   state.fallbackCauses = newSeq[array[FallbackCause, int]](config.numAgents)
@@ -684,7 +851,7 @@ proc serveForTests*(config: GameConfig, port: int, host = "127.0.0.1") =
   ## Blocking. Call `stopTestServer()` from another thread to end it.
   prepareState(config)
   let router = buildRouter(replayMode = false)
-  gameServer = newServer(router, websocketHandler, workerThreads = 2)
+  gameServer = newServer(router, websocketHandler, workerThreads = 2, maxMessageLen = 16 * 1024 * 1024)
   gameServer.serve(Port(port), host)
 
 proc stopTestServer*() =
@@ -696,13 +863,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   assertFileUri("COGAME_METRICS_URI")
   if config.tokens.len < config.numAgents:
     raise newException(LanternError, "tokens and players must align")
-  state.config = config
-  state.sim = newSim(config, loadMapSpec(config.mapPath))
-  state.roster = initRoster(config)
-  state.actionReplies = initTable[int, string]()
-  state.llmTurns = newSeq[int](config.numAgents)
-  state.fallbackTurns = newSeq[int](config.numAgents)
-  state.fallbackCauses = newSeq[array[FallbackCause, int]](config.numAgents)
+  prepareState(config)
 
   ## Pre-listen bake: the wall mask and the occlusion grid are built by
   ## newSim above, before the socket opens, so a spectator's first frame is
@@ -723,7 +884,33 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim.emit(actStartEvent(0, 1, actBuild))
 
   let router = buildRouter(replayMode = false)
-  gameServer = newServer(router, websocketHandler, workerThreads = 4)
-  createThread(gameThread, runEpisode, runtimeConfig)
+  gameServer = newServer(router, websocketHandler, workerThreads = 4, maxMessageLen = 16 * 1024 * 1024)
+  let seconds = parseFloat(getEnv("COWORLD_TIMEOUT_SECONDS", $(config.episodeTimeoutMs.float / 1000.0)))
+  if classify(seconds) in {fcNan, fcInf, fcNegInf} or seconds <= 0:
+    raise newException(LanternError, "episode timeout must be finite and positive")
+  state.episodeDeadline = getMonoTime() + initDuration(milliseconds = int64(seconds * 1000))
+  installNativeStopHandlers()
+  var ownerCreated = false
   echo "lantern: serving on ", runtimeConfig.host, ":", runtimeConfig.port
-  gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host)
+  try:
+    gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host,
+      onReady = proc(server: Server) {.gcsafe.} =
+        {.gcsafe.}:
+          createThread(gameThread, runEpisode, runtimeConfig)
+          ownerCreated = true)
+  finally:
+    requestNativeStop()
+    if ownerCreated:
+      joinThread(gameThread)
+    elif getEnv(CogameSaveTrajectoryUriEnv).len > 0:
+      let trajectory = newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+        "lantern-" & $config.seed, "lantern", getEnv("COWORLD_GAME_VERSION"),
+        getEnv("COWORLD_SOURCE_REVISION"))
+      trajectory.finish(esFailed, %*{"termination": "server-did-not-start",
+        "rules_version": GameVersion}, newJNull())
+      let httpMethod = case getEnv("COGAME_SAVE_TRAJECTORY_METHOD", "PUT")
+        of "PUT": ahPut
+        of "POST": ahPost
+        else: raise newException(LanternError, "trajectory method must be PUT or POST")
+      trajectory.writeTrajectoryArtifact(getEnv(CogameSaveTrajectoryUriEnv),
+        min(state.episodeDeadline, getMonoTime() + initDuration(seconds = 5)), httpMethod)

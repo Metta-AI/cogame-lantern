@@ -44,9 +44,9 @@ RUN rm -f nim.cfg && \
     else echo "--path:\"$pkg\"" >> nim.cfg; fi; \
   done && \
   echo '--path:"src"' >> nim.cfg && \
-  nim c -d:release -d:useMalloc --opt:speed --stackTrace:on \
+  nim c --parallelBuild:1 -d:release -d:useMalloc --opt:speed --stackTrace:on \
     --nimcache:/tmp/lantern-nimcache --out:lantern src/lantern.nim && \
-  nim c -d:release -d:useMalloc --opt:speed --stackTrace:on \
+  nim c --parallelBuild:1 -d:release -d:useMalloc --opt:speed --stackTrace:on \
     --nimcache:/tmp/lantern-player-nimcache --out:lantern-player \
     src/lantern_player.nim
 
