@@ -49,7 +49,7 @@ if command -v emcc >/dev/null && command -v nim >/dev/null &&
 else
   # Use the pinned container when local compiler versions do not match.
   image_tag="lantern-replay-viewer-build:$$"
-  docker build --platform linux/amd64 \
+  docker build --load --platform linux/amd64 \
     --file "${repo_dir}/Dockerfile.replay-viewer" \
     --tag "${image_tag}" "${repo_dir}"
   container_id="$(docker create "${image_tag}")"
