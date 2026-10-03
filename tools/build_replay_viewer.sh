@@ -28,8 +28,8 @@ if command -v emcc >/dev/null && command -v nim >/dev/null; then
   # Local toolchain: build the wasm module and assemble dist/ directly.
   (
     cd "${repo_dir}"
-    nim c --hints:off -d:emscripten replay-viewer/lantern_replay.nim
-    nim r --hints:off --path:src tools/gen_wire_constants.nim \
+    nim c --parallelBuild:1 --hints:off -d:emscripten replay-viewer/lantern_replay.nim
+    nim r --parallelBuild:1 --hints:off --path:src tools/gen_wire_constants.nim \
       > replay-viewer/dist/wire_constants.js
     cp client/chrome_common.js client/broadcast_core.js replay-viewer/dist/
     cp replay-viewer/static_replay.js replay-viewer/static_replay_worker.js \
