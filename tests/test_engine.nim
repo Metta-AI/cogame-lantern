@@ -1,12 +1,11 @@
 ## The game sends one private view per active model seat before taking actions.
 
 import std/[json, options, strutils, unicode, unittest]
-import curly
 import bitworld/decision_trajectory
 import support/helpers
 import lantern/[decision, llm, server]
 
-type ExchangeMode = enum valid, invalid, missing, noCredentials
+type ExchangeMode = enum valid, invalid, missing, noCredentials, canceled
 var
   mode: ExchangeMode
   batches: seq[seq[JsonNode]]
@@ -14,8 +13,8 @@ var
 
 proc actionFor(request: JsonNode): string =
   $ %*{
-    "type": "action", "protocol": "lantern.player.v2",
-    "id": request["id"], "source": "llm",
+    "type": "action", "protocol": "lantern.player.v3",
+    "decision_id": request["decision_id"], "source": "external", "training_attempt": nil,
     "order": {"intent": "hide", "target": [240, 329],
               "crawl": true, "note": "settling behind a crate"}
   }
@@ -31,11 +30,13 @@ proc exchange(requests: seq[JsonNode], timeoutMs: int):
       of valid: result[position] = actionFor(request)
       of invalid: result[position] = "not json"
       of missing: discard
+      of canceled:
+        result[position] = $(%*{"type": "attempt_interrupted", "training_attempt": nil})
       of noCredentials:
         result[position] = $ %*{
-          "type": "action", "protocol": "lantern.player.v2",
-          "id": request["id"], "source": "fallback",
-          "cause": "no_credentials"}
+          "type": "action", "protocol": "lantern.player.v3",
+          "decision_id": request["decision_id"], "source": "fallback",
+          "cause": "no_endpoint", "training_attempt": nil}
 
 proc reset(which: ExchangeMode) =
   mode = which
@@ -54,8 +55,8 @@ suite "ordinary player decisions":
     for position, request in batches[0]:
       check request["slot"].getInt() == buildSeats[position]
       check request["role"].getStr() == "hider"
-      check request["view"]["turn"].getInt() == 0
-      check request["view"]["you"]["alias"].getStr() ==
+      check request["observation"]["turn"].getInt() == 0
+      check request["observation"]["you"]["alias"].getStr() ==
         aliasOfSlot(buildSeats[position])
       check decisions[position].source == osLlm
       check decisions[position].order.intent == inHide
@@ -66,7 +67,7 @@ suite "ordinary player decisions":
     check batches.len == 1
     check batches[0].len == Seats
     for request in batches[0]:
-      check request["view"]["half"].getInt() == 1
+      check request["observation"]["half"].getInt() == 1
 
   test "an invalid action retries once and then plays warden":
     let sim = testSim()
@@ -147,49 +148,6 @@ suite "the roster":
         "type": "register", "kind": "scripted", "scripted": "unknown"})
     check roster.scriptKinds()[2] == skWarden
 
-suite "provider text remains rune-safe":
-  test "a non-ASCII throttle body has valid UTF-8 in its error":
-    let client = newLlmClient()
-    var response: Response
-    response.code = 429
-    response.body = "\u{1F526}".repeat(400)
-    var message = ""
-    try:
-      discard client.textOf(response, "", "https://api.anthropic.com")
-    except CatchableError as error:
-      message = error.msg
-    check validateUtf8(message) == -1
-    check "\u{1F526}" in message
-
-  test "a non-ASCII authentication body has valid UTF-8":
-    let client = newLlmClient()
-    var response: Response
-    response.code = 401
-    response.body = "\u20AC".repeat(500)
-    var message = ""
-    try:
-      discard client.textOf(response, "", "https://api.anthropic.com")
-    except CatchableError as error:
-      message = error.msg
-    check validateUtf8(message) == -1
-    check "\u20AC" in message
-
-  test "a cut-off non-ASCII model reply has valid UTF-8":
-    let client = newLlmClient()
-    var response: Response
-    response.code = 200
-    response.body = $ %*{
-      "stop_reason": "max_tokens",
-      "content": [{"type": "text", "text": "alcove \u00E9 " &
-        "\u{1F526}".repeat(200)}]}
-    var message = ""
-    try:
-      discard client.textOf(response, "", "https://api.anthropic.com")
-    except CatchableError as error:
-      message = error.msg
-    check validateUtf8(message) == -1
-    check "\u{1F526}" in message
-
 suite "result and replay on interrupted episodes":
   test "a sim fault scores one half and keeps a replay":
     let sim = testSim(prep = 240, hunt = 480)
@@ -227,10 +185,10 @@ suite "result and replay on interrupted episodes":
     let sim = testSim(prep = 240, hunt = 480)
     for origin in [aoTeacher, aoHuman]:
       let evidence = newDecisionAttempt("asserted", "external-policy", origin)
-      let reply = %*{"type": "action", "protocol": "lantern.player.v2", "id": 1,
+      let reply = %*{"type": "action", "protocol": "lantern.player.v3", "decision_id": "fixture-1",
         "source": "llm", "order": {"intent": "wait"},
         "training_attempt": evidence.attemptEvidenceJson()}
-      let proposal = playerProposal($reply, 1, 0, 1, sim)
+      let proposal = playerProposal($reply, "fixture-1", 0, 1, sim)
       check proposal.kind == pkAccepted
       check proposal.evidence.origin == aoUnknown
       check proposal.evidence.accepted
@@ -239,10 +197,50 @@ suite "result and replay on interrupted episodes":
     let sim = testSim(prep = 240, hunt = 480)
     var evidence = newDecisionAttempt("sampled", "model-policy", aoModel)
     evidence.response = %"{\"intent\":\"wait\"}"
-    let reply = %*{"type": "action", "protocol": "lantern.player.v2", "id": 1,
+    let reply = %*{"type": "action", "protocol": "lantern.player.v3", "decision_id": "fixture-1",
       "source": "llm", "order": {"intent": "hide", "target": [240, 329]},
       "training_attempt": evidence.attemptEvidenceJson()}
-    let proposal = playerProposal($reply, 1, 0, 1, sim)
+    let proposal = playerProposal($reply, "fixture-1", 0, 1, sim)
     check proposal.kind == pkRejected
     check not proposal.evidence.accepted
     check proposal.evidence.parsedAction["intent"].getStr() == "wait"
+
+  test "unjoined or partial received completions cannot select a model action":
+    let sim = testSim(prep = 240, hunt = 480)
+    for (complete, joined) in [(false, true), (true, false), (true, true)]:
+      var evidence = newDecisionAttempt("fixture-1-model", "model-policy", aoModel)
+      evidence.response = %"{\"intent\":\"wait\"}"
+      evidence.model = some("actual-model")
+      evidence.rawResponse = %($(%*{"model": "actual-model",
+        "content": [{"type": "text", "text": evidence.response.getStr()}]}))
+      evidence.responseComplete = some(complete)
+      evidence.responseReaderJoined = some(joined)
+      evidence.httpStatus = some(200)
+      let reply = %*{"type": "action", "protocol": "lantern.player.v3", "decision_id": "fixture-1",
+        "source": "llm", "response": evidence.response,
+        "training_attempt": evidence.attemptEvidenceJson()}
+      let proposal = playerProposal($reply, "fixture-1", 0, 1, sim)
+      check proposal.kind == (if complete and joined: pkAccepted else: pkRejected)
+      check proposal.evidence.accepted == (complete and joined)
+
+  test "interruption ends the shared retry budget before another request":
+    let sim = testSim(prep = 240, hunt = 480)
+    reset(canceled)
+    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+      newSeq[ScriptKind](sim.seats), false, exchange)
+    check batches.len == 1
+    for decision in decisions:
+      check decision.selectedAttemptId.isNone
+      check decision.attempts.len == 1
+      check not decision.attempts[0].accepted
+      check decision.attempts[0].rejectionReason == some("episode interrupted before engine order installation")
+
+  test "configured short turns cap both shared retry windows":
+    let sim = testSim(prep = 240, hunt = 480)
+    sim.config.turnBudgetMs = 100
+    reset(invalid)
+    discard decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+      newSeq[ScriptKind](sim.seats), false, exchange)
+    check deadlines.len == 2
+    check deadlines[0] <= 100 and deadlines[0] > 0
+    check deadlines[1] <= deadlines[0] and deadlines[1] > 0

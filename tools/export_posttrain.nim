@@ -35,8 +35,6 @@ when isMainModule:
       variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil
   var
-    trainRows: seq[string]
-    validationRows: seq[string]
     trajectoryRows: seq[string]
     runs = newJArray()
   for seed in firstSeed ..< firstSeed + matches:
@@ -53,7 +51,7 @@ when isMainModule:
     let trajectory = newDecisionTrajectory(episodeId, "lantern-" & $seed,
       "lantern", gameVersion, sourceRevision)
     var pending: seq[PendingMacro]
-    var rows: seq[string]
+    var decisionCount = 0
     while sim.tick < totalTicks(config):
       sim.prepareTick()
       if isTurnStart(config, sim.tick):
@@ -73,27 +71,14 @@ when isMainModule:
             {"role": "user", "content": userPrompt(view, OperatorPrompt, false)}]
           var evidence = newDecisionAttempt($sim.tick & "-" & $seat & "-teacher",
             "private-view-teacher", aoTeacher)
-          evidence.model = some("private-view-teacher")
-          evidence.modelIdentity = some(sourceRevision)
           evidence.prompt = prompt
-          evidence.request = %*{"teacher": "private-view-teacher", "observation": view}
           evidence.response = %($proposed)
-          evidence.rawResponse = %($proposed)
-          evidence.decoder = %*{"method": "deterministic"}
           evidence.parsedAction = completion
           evidence.accepted = true
           pending.add(PendingMacro(seat: seat, startTick: sim.tick,
             decision: Decision(order: parsed, source: osScripted, observation: view,
               attempts: @[evidence], selectedAttemptId: some(evidence.attemptId))))
-          rows.add($(%*{
-            "episode_id": "lantern-" & variant & "-" & $seed,
-            "seed": "lantern-" & $seed,
-            "decision_id": rows.len,
-            "observation": view, "prompt": prompt,
-            "completion": [{"role": "assistant", "content": $completion}],
-            "game": "lantern",
-            "action_schema_revision": "lantern-order-v1"
-          }))
+          inc decisionCount
           sim.cogs[seat].order = parsed
           sim.cogs[seat].orderSource = osScripted
           sim.cogs[seat].hasOrder = true
@@ -101,7 +86,7 @@ when isMainModule:
       sim.controls.add(controls)
       sim.applyTick(controls)
     trajectory.recordMacros(sim, pending, terminal = true)
-    doAssert sim.tick == totalTicks(config) and rows.len > 0
+    doAssert sim.tick == totalTicks(config) and decisionCount > 0
     let kinds = @["scripted", "scripted", "scripted", "scripted",
       "scripted", "scripted"]
     let zeros = newSeq[int](Seats)
@@ -112,16 +97,10 @@ when isMainModule:
     for seat in 0 ..< Seats: outcomes[$seat] = outcome["scores"][seat]
     trajectory.finish(esCompleted, outcome, outcomes)
     trajectoryRows.add(trajectory.eventsJsonl().strip())
-    if seed mod 5 == 0:
-      validationRows.add(rows)
-    else:
-      trainRows.add(rows)
-    runs.add(%*{"seed": seed, "decisions": rows.len,
+    runs.add(%*{"seed": seed, "decisions": decisionCount,
       "scores": outcome["scores"], "ticks_played": sim.tick})
-  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
-  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
-  writeFile(output / "trajectories.jsonl", trajectoryRows.join("\n") & "\n")
-  writeFile(output / "manifest.json", pretty(%*{
+  writePrivate(output / "trajectories.jsonl", trajectoryRows.join("\n") & "\n")
+  writePrivate(output / "manifest.json", pretty(%*{
     "schema_version": 1,
     "game": "lantern",
     "variant": variant,
@@ -129,10 +108,8 @@ when isMainModule:
     "game_version": gameVersion,
     "teacher": "private-view-teacher",
     "operator_prompt": OperatorPrompt,
-    "train_examples": trainRows.len,
-    "validation_examples": validationRows.len,
+    "episodes": matches,
+    "dataset_path": "canonical-trajectories-only; shared reviewed importer owns splits",
     "runs": runs
   }) & "\n")
-  for name in ["train.jsonl", "validation.jsonl", "trajectories.jsonl", "manifest.json"]:
-    setFilePermissions(output / name, {fpUserRead, fpUserWrite})
-  echo "train=", trainRows.len, " validation=", validationRows.len
+  echo "episodes=", matches, " canonical private export; shared importer supplies reviewed splits"

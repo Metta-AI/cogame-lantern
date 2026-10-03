@@ -3,14 +3,13 @@
 Three surfaces: the **player** websocket (what a policy container speaks), the
 **global** spectator stream, and the **replay** bytes. All JSON, all UTF-8.
 
-## Player protocol — `lantern.player.v2`
+## Player protocol — `lantern.player.v3`
 
 JSON text frames over the websocket named by `COWORLD_PLAYER_WS_URL` (the
 platform already appends `?slot=N&token=T`). A bad slot or token gets a **403**
 and a second connection on a live slot gets a **409**.
 
-On connect the player declares a policy kind. Model prompts and credentials
-remain inside that player:
+On connect the player declares a policy kind. Model prompts remain inside that player:
 
 ```json
 {"type": "register",
@@ -28,14 +27,14 @@ decision request and waits for an action. After applying orders it sends an
 informational `turn` frame. The final frame carries results:
 
 ```json
-{"type": "welcome", "protocol": "lantern.player.v2", "slot": 0,
+{"type": "welcome", "protocol": "lantern.player.v3", "slot": 0,
  "alias": "Moth-1", "team": "Moth", "hides_in_half": 1, "turns": 42}
 
-{"type": "decision", "protocol": "lantern.player.v2", "id": 20401,
- "slot": 0, "role": "hider", "attempt": 1, "timeout_ms": 8500,
- "view": { …private seat view… }}
+{"type": "decision", "protocol": "lantern.player.v3", "decision_id": "lantern-2040-0-1",
+ "slot": 0, "role": "hider", "attempt": 1, "transport": {"budget_ms": 8500, "cleanup_budget_ms": 5000},
+ "observation": { …private seat view… }}
 
-{"type": "action", "protocol": "lantern.player.v2", "id": 20401,
+{"type": "action", "protocol": "lantern.player.v3", "decision_id": "lantern-2040-0-1",
  "source": "llm", "response": "<exact model text>",
  "training_attempt": { …private attempt evidence… }}
 
@@ -46,8 +45,8 @@ informational `turn` frame. The final frame carries results:
 ```
 
 The `turn` frame is informational. Scripted seats receive no decision request.
-With no model credential, a model player replies with `source: "fallback"`
-and `cause: "no_credentials"`. The game applies its warden baseline and
+With no native sidecar endpoint, a model player replies with `source: "fallback"`
+and `cause: "no_endpoint"`. The game applies its warden baseline and
 records the cause.
 
 ## The per-seat view
@@ -237,10 +236,10 @@ player pods down the moment `results.json` exists.
 
 ## Private training capture
 
-Native players send an `attempt_started` frame with the current decision `id` and
+Native players send an `attempt_started` frame with the current string `decision_id` and
 strict `training_attempt` before making the HTTP request. They return the completed
 attempt on `action`; external policies may instead return an ordinary `order`
-object without model evidence. Such actions retain unknown origin and cannot become
+object with `source: "external"` and `training_attempt: null`. Such actions retain unknown origin and cannot become
 model training labels. Only the game assigns parsed action, acceptance, and the
 selected attempt after applying the ordinary parser.
 
@@ -250,3 +249,21 @@ unanswered requests, actual platform call IDs, exact private inputs, and physica
 macro execution. A macro ends at the next decision turn or terminal tick; its end
 tick is exclusive. The four control bytes per tick use the same encoding as replay.
 Platform archive joins must independently verify player-supplied model provenance.
+
+Before sealing, the game sends `stop` with an unpredictable `stop_id`, the latest
+`decision_id` (or null), and a remaining cleanup budget. Every registered player
+joins its owned request, then returns `stopped` with the echoed IDs, `worker_status`
+(`joined` or `no_active_call`), and actual private `attempts`. The game confirms
+immutable fact delivery with `evidence_received` before the socket closes. This
+acknowledgement grants no platform receipt authority. A player exits after confirmed
+stop evidence delivery; it does not wait for a public final frame.
+
+Authenticated socket bindings survive disconnect until sealing. Missing stop
+acknowledgements or interruption produce private truncated episodes; normal public
+results are withheld. Native transport retains exact base64 header/body bytes,
+observed status, completeness, and reader-join facts. One monotonic cleanup deadline
+covers private capture followed by public artifacts. Inference stop is irreversible.
+
+The native player uses the shared owned WebSocket reader with a 16 MiB message
+budget. Partial frames survive timeouts. TLS uses normal certificate and hostname
+verification, with `SSL_CERT_FILE` honored when configured.

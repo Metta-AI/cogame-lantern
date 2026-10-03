@@ -1,9 +1,7 @@
 ## The websocket and HTTP contract, against a real in-process server.
 ##
-## The game thread is deliberately NOT started here: it ends an episode with
-## `quit(0)`, which would take the test process with it and turn a failure
-## into a green run. `serveForTests` is everything `runGameServer` does except
-## that thread.
+## No episode owner runs here. The tests own the real server lifetime and
+## close/join it explicitly after inspecting its HTTP/WebSocket contract.
 
 import std/[httpclient, json, options, os, strutils, unittest]
 import bitworld/runtime
@@ -65,7 +63,7 @@ suite "the server":
     check welcome.isSome
     let payload = parseJson(welcome.get().data)
     check payload["type"].getStr() == "welcome"
-    check payload["protocol"].getStr() == "lantern.player.v2"
+    check payload["protocol"].getStr() == "lantern.player.v3"
     check payload["alias"].getStr() == "Moth-1"
     check payload["team"].getStr() == "Moth"
     check payload["hides_in_half"].getInt() == 1
