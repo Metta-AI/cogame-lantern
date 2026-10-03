@@ -24,8 +24,12 @@ fi
 
 export PATH="$HOME/.nimby/nim/bin:$PATH"
 
-if command -v emcc >/dev/null && command -v nim >/dev/null; then
-  # Local toolchain: build the wasm module and assemble dist/ directly.
+pinned_emscripten="$(sed -n 's/^FROM emscripten\/emsdk:\([^ ]*\).*/\1/p' "$repo_dir/Dockerfile.replay-viewer")"
+pinned_nim="$(sed -n 's/.*nimby use \([0-9.]*\).*/\1/p' "$repo_dir/Dockerfile.replay-viewer")"
+if command -v emcc >/dev/null && command -v nim >/dev/null &&
+   [[ "$(emcc --version | sed -n '1s/.*) \([0-9.]*\).*/\1/p')" == "$pinned_emscripten" ]] &&
+   [[ "$(nim --version | sed -n '1s/^Nim Compiler Version \([^ ]*\).*/\1/p')" == "$pinned_nim" ]]; then
+  # Matching pinned local toolchain: assemble the same WASM module directly.
   (
     cd "${repo_dir}"
     nim c --parallelBuild:1 --hints:off -d:emscripten replay-viewer/lantern_replay.nim
@@ -43,7 +47,7 @@ if command -v emcc >/dev/null && command -v nim >/dev/null; then
         client/replay_broadcast.html > replay-viewer/dist/index.html
   )
 else
-  # Fall back to the pinned emsdk container (the CI runner has no emcc).
+  # Use the pinned container when local compiler versions do not match.
   image_tag="lantern-replay-viewer-build:$$"
   docker build --platform linux/amd64 \
     --file "${repo_dir}/Dockerfile.replay-viewer" \
