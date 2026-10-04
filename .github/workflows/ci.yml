@@ -158,6 +158,10 @@ jobs:
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-player src/lantern_player.nim
           python3 tools/test_native_trajectory.py /tmp/lantern-game /tmp/lantern-player
           python3 tools/test_native_lifecycle.py /tmp/lantern-game /tmp/lantern-player "$RUNNER_TEMP/lantern-lifecycle"
+          nim c -d:release --hints:off --path:src -o:/tmp/lantern-start-player tests/support/start_chronology_player.nim
+          for mode in first joined; do
+            COWORLD_TEST_SOURCE_REVISION=$(git rev-parse HEAD) python3 tools/test_start_chronology.py /tmp/lantern-game /tmp/lantern-start-player "$RUNNER_TEMP/lantern-start-chronology-$mode" "$mode"
+          done
 
       - name: Mixed ordinary player episode
         run: |

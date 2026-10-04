@@ -5,6 +5,7 @@
 # The bundle is HERMETIC: the page fetches nothing but the replay URL it was
 # handed. Every asset it draws with is copied in here.
 FROM emscripten/emsdk:4.0.15 AS replay-viewer-builder
+SHELL ["/usr/bin/nice", "-n", "19", "/bin/sh", "-c"]
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends ca-certificates curl git && \
