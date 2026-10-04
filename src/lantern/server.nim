@@ -46,6 +46,8 @@ type
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
+    finalizationStarted: bool
+    runtimeInputs: JsonNode
     llmTurns: seq[int]
     fallbackTurns: seq[int]
     fallbackCauses: seq[array[FallbackCause, int]]
@@ -358,6 +360,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     let cleanupDeadline = min(state.episodeDeadline, getMonoTime() + initDuration(seconds = 5))
     var targets: seq[int]
     withLock stateLock:
+      state.finalizationStarted = true
       state.stopping = true
       var nonce: array[16, byte]
       doAssert urandom(nonce), "OS entropy unavailable for stop identity"
@@ -439,6 +442,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           elif reason == erComplete: esCompleted else: esFailed
         let privateOutcome = copy(results)
         privateOutcome["player_cleanup"] = cleanup
+        privateOutcome["runtime_inputs"] = copy(state.runtimeInputs)
         trajectory.finish(status, privateOutcome,
           if status == esCompleted: outcomes else: newJNull())
       state.lastResults = results
@@ -821,15 +825,51 @@ proc buildRouter(replayMode: bool): Router =
   if not replayMode:
     result.get("/player", playerUpgradeHandler)
 
-proc runReplayServer*(runtimeConfig: RuntimeConfig) =
-  ## Replay mode serves the recorded bytes to the local broadcast viewer.
-  ## The HOSTED viewer never comes here — it is the static wasm bundle,
-  ## fed straight from S3.
+proc writeInitializationCheckpoint*(status: EpisodeStatus, phase, errorType, errorMessage: string,
+    episodeDeadline: MonoTime, inputCaptures: JsonNode) =
+  withLock stateLock:
+    if state.finalizationStarted: return
+    state.finalizationStarted = true
+  requestNativeStop()
+  let uri = getEnv(CogameSaveTrajectoryUriEnv)
+  if uri.len == 0: return
+  let episodeId = getEnv("COWORLD_EPISODE_ID")
+  let trajectory = newDecisionTrajectory(episodeId, "lantern-initialization-" & episodeId,
+    "lantern", getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION"))
+  doAssert status in {esFailed, esTruncated}
+  trajectory.finish(status, %*{"reason": "runtime_initialization", "phase": phase,
+    "error_type": errorType, "error": errorMessage, "seed_known": false,
+    "rules_version": GameVersion, "runtime_inputs": inputCaptures}, newJNull())
+  let httpMethod = case getEnv("COGAME_SAVE_TRAJECTORY_METHOD", "PUT").toUpperAscii()
+    of "PUT": ahPut
+    of "POST": ahPost
+    else: raise newException(LanternError, "trajectory method must be PUT or POST")
+  trajectory.writeTrajectoryArtifact(uri,
+    min(episodeDeadline, getMonoTime() + initDuration(seconds = 5)), httpMethod)
+
+var replayOwner: Thread[MonoTime]
+
+proc watchReplay(deadline: MonoTime) {.thread.} =
+  {.gcsafe.}:
+    while not interruptionRequested() and getMonoTime() < deadline: sleep(10)
+    gameServer.close()
+
+proc runReplayServer*(runtimeConfig: RuntimeConfig, episodeDeadline: MonoTime) =
+  ## Hosted replay uses the static bundle. The local listener owns this watchdog.
   replayPayloadGlobal = runtimeConfig.replay
   let router = buildRouter(replayMode = true)
   gameServer = newServer(router, websocketHandler, workerThreads = 4, maxMessageLen = 16 * 1024 * 1024)
+  var ownerCreated = false
   echo "lantern: replay mode on ", runtimeConfig.host, ":", runtimeConfig.port
-  gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host)
+  try:
+    gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host,
+      onReady = proc(server: Server) {.gcsafe.} =
+        {.gcsafe.}:
+          createThread(replayOwner, watchReplay, episodeDeadline)
+          ownerCreated = true)
+  finally:
+    requestNativeStop()
+    if ownerCreated: joinThread(replayOwner)
 
 proc prepareState*(config: GameConfig) =
   ## Everything runGameServer does before it opens a socket. Exposed so
@@ -859,6 +899,8 @@ proc prepareState*(config: GameConfig) =
   state.fallbackCauses = newSeq[array[FallbackCause, int]](config.numAgents)
   state.started = false
   state.finished = false
+  state.finalizationStarted = false
+  state.runtimeInputs = newJArray()
 
 proc serveForTests*(config: GameConfig, port: int, host = "127.0.0.1") =
   ## Blocking. Call `stopTestServer()` from another thread to end it.
@@ -871,12 +913,15 @@ proc stopTestServer*() =
   if gameServer != nil:
     gameServer.close()
 
-proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
+proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig,
+    episodeDeadline: MonoTime, runtimeInputs: JsonNode) =
   assertFileUri("COGAME_EVENTS_URI")
   assertFileUri("COGAME_METRICS_URI")
   if config.tokens.len < config.numAgents:
     raise newException(LanternError, "tokens and players must align")
   prepareState(config)
+  state.episodeDeadline = episodeDeadline
+  state.runtimeInputs = copy(runtimeInputs)
 
   ## Pre-listen bake: the wall mask and the occlusion grid are built by
   ## newSim above, before the socket opens, so a spectator's first frame is
@@ -898,11 +943,6 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
 
   let router = buildRouter(replayMode = false)
   gameServer = newServer(router, websocketHandler, workerThreads = 4, maxMessageLen = 16 * 1024 * 1024)
-  let seconds = parseFloat(getEnv("COWORLD_TIMEOUT_SECONDS", $(config.episodeTimeoutMs.float / 1000.0)))
-  if classify(seconds) in {fcNan, fcInf, fcNegInf} or seconds <= 0:
-    raise newException(LanternError, "episode timeout must be finite and positive")
-  state.episodeDeadline = getMonoTime() + initDuration(milliseconds = int64(seconds * 1000))
-  installNativeStopHandlers()
   var ownerCreated = false
   echo "lantern: serving on ", runtimeConfig.host, ":", runtimeConfig.port
   try:
@@ -919,8 +959,9 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
       let trajectory = newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
         "lantern-" & $config.seed, "lantern", getEnv("COWORLD_GAME_VERSION"),
         getEnv("COWORLD_SOURCE_REVISION"))
+      state.finalizationStarted = true
       trajectory.finish(esFailed, %*{"termination": "server-did-not-start",
-        "rules_version": GameVersion}, newJNull())
+        "rules_version": GameVersion, "runtime_inputs": copy(state.runtimeInputs)}, newJNull())
       let httpMethod = case getEnv("COGAME_SAVE_TRAJECTORY_METHOD", "PUT")
         of "PUT": ahPut
         of "POST": ahPost

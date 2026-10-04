@@ -57,7 +57,8 @@ suite "the game binary":
       "COGAME_CONFIG_URI=" & quoteShell("file://" & path) & " " &
       quoteShell(game))
     check seatCode == 2
-    check "seats exactly 6" in seatOutput
+    check "invalid episode config" in seatOutput
+    check "Error: unhandled exception" notin seatOutput
 
 suite "the player binary":
   let player = build("src/lantern_player.nim", "lantern-player")
