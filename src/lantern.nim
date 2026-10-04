@@ -7,8 +7,8 @@
 ## an unpinned one is randomised and the unpinned field is stripped so it
 ## cannot clobber the injected value.
 
-import std/[json, os, strutils, sysrand]
-import bitworld/runtime
+import std/[json, math, monotimes, os, strutils, sysrand, times]
+import bitworld/[runtime, runtime_input, native_http, native_stop, decision_trajectory]
 import lantern/[types, config, server]
 
 const Usage = """
@@ -53,16 +53,41 @@ when isMainModule:
       echo Usage
       quit(0)
 
+  installNativeStopHandlers()
+  let processStarted = getMonoTime()
+  var episodeDeadline = processStarted + initDuration(milliseconds = defaultGameConfig().episodeTimeoutMs)
+  var inputControl: NativeRequestControl
+  var inputCaptures: seq[RuntimeInputCapture]
   var runtimeConfig: RuntimeConfig
   try:
-    runtimeConfig = readRuntimeConfig()
+    let timeout = parseFloat(getEnv("COWORLD_TIMEOUT_SECONDS",
+      $(defaultGameConfig().episodeTimeoutMs.float / 1000.0)))
+    if classify(timeout) in {fcNan, fcInf, fcNegInf} or timeout <= 0:
+      raise newException(LanternError, "episode timeout must be finite and positive")
+    episodeDeadline = processStarted + initDuration(nanoseconds = int64(timeout * 1_000_000_000))
+    let inputDeadline = min(episodeDeadline - initDuration(seconds = 5),
+      processStarted + initDuration(seconds = 60))
+    proc input(value, source: string): string =
+      readRuntimeInput(value, source, inputDeadline, inputControl,
+        16 * 1024 * 1024, 64 * 1024, inputCaptures)
+    runtimeConfig = readRuntimeConfig(input)
   except CatchableError as error:
-    die("bad runtime configuration: " & error.msg.splitLines()[0])
+    let status = if interruptionRequested(): esTruncated else: esFailed
+    writeInitializationCheckpoint(status, "runtime_config", $error.name, error.msg,
+      episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+    if status == esTruncated: quit(0)
+    die("bad runtime configuration (" & $error.name & ")")
+  if interruptionRequested():
+    writeInitializationCheckpoint(esTruncated, "runtime_config", "stop_requested",
+      "process stop requested", episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+    quit(0)
 
   if runtimeConfig.replayMode:
-    runReplayServer(runtimeConfig)
+    runReplayServer(runtimeConfig, episodeDeadline)
   else:
     if runtimeConfig.config.strip().len == 0:
+      writeInitializationCheckpoint(esFailed, "game_config", "missing_config", "COGAME_CONFIG_URI is required",
+        episodeDeadline, runtimeInputCapturesJson(inputCaptures))
       die("COGAME_CONFIG_URI is not set (or names an empty config); " &
         "lantern needs an episode config to know its seats. Try --help.")
     var config = defaultGameConfig()
@@ -76,7 +101,11 @@ when isMainModule:
     try:
       config.update(runtimeConfig.config)
     except CatchableError as error:
-      die("invalid episode config: " & error.msg.splitLines()[0])
+      writeInitializationCheckpoint(esFailed, "game_config", $error.name, error.msg,
+        episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+      die("invalid episode config (" & $error.name & ")")
+    if getEnv("COWORLD_TIMEOUT_SECONDS").len == 0:
+      episodeDeadline = processStarted + initDuration(milliseconds = config.episodeTimeoutMs)
     if randomised:
       echo "lantern: seed not pinned; randomised to ", config.seed
     echo "lantern: seats=", config.numAgents,
@@ -86,6 +115,8 @@ when isMainModule:
       " turnTicks=", config.turnTicks,
       " wallClockBudget=", config.wallClockBudgetMs div 1000, "s"
     try:
-      runGameServer(config, runtimeConfig)
+      runGameServer(config, runtimeConfig, episodeDeadline, runtimeInputCapturesJson(inputCaptures))
     except LanternError as error:
-      die(error.msg.splitLines()[0])
+      writeInitializationCheckpoint(esFailed, "game_server", $error.name, error.msg,
+        episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+      die("game server rejected (" & $error.name & ")")

@@ -64,5 +64,7 @@ COPY --from=build /workspace/lantern/lantern /bin/lantern
 COPY --from=build /workspace/lantern/lantern-player /bin/lantern-player
 COPY --from=build /workspace/lantern/data ./data
 COPY --from=build /workspace/lantern/client ./client
+RUN find data client -type d -exec chmod 755 {} + && \
+  find data client -type f -exec chmod 644 {} +
 
 CMD ["/bin/lantern"]
