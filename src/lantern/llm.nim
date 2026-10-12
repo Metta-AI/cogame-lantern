@@ -14,7 +14,7 @@
 ## microseconds, and writes a `fallback` event naming the cause.
 ##
 ## Credentials, in order of preference:
-##   Bedrock sidecar / bearer token   - hosted pods
+##   COWORLD_LLM_ENDPOINT (hosted), then local Bedrock / bearer token   - hosted pods
 ##   ANTHROPIC_API_KEY                - the key itself
 ##   ANTHROPIC_API_KEY_URI            - a URI holding the key
 ## With no credentials at all the client disables itself on first discovery
@@ -64,7 +64,7 @@ line of sight. Pushing and running make noise; crawling does not.
 
 type
   LlmTransport* = enum
-    ltNone, ltBedrock, ltAnthropic
+    ltNone, ltSidecar, ltBedrock, ltAnthropic
 
   LlmRequest* = object
     seat*: int
@@ -78,6 +78,7 @@ type
   LlmClient* = ref object
     curl: Curly
     transport*: LlmTransport
+    sidecarEndpoint: string
     apiKey: string
     bedrockEndpoint: string
     bedrockModels: seq[string]
@@ -141,7 +142,7 @@ proc bedrockUrl(client: LlmClient): string =
   client.bedrockEndpoint & "/model/" &
     client.bedrockModels[client.bedrockModel] & "/invoke"
 
-proc requestFor(client: LlmClient, system, user: string):
+proc requestFor(client: LlmClient, system, user: string, slot: int):
     tuple[url: string, headers: HttpHeaders, body: string] =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
@@ -156,6 +157,11 @@ proc requestFor(client: LlmClient, system, user: string):
     if client.bedrockToken.len > 0:
       headers["authorization"] = "Bearer " & client.bedrockToken
     result.url = client.bedrockUrl()
+  elif client.transport == ltSidecar:
+    body["model"] = %client.model
+    headers["X-Coworld-Player-Slot"] = $slot
+    headers["anthropic-version"] = AnthropicVersion
+    result.url = client.sidecarEndpoint & "/v1/messages"
   else:
     body["model"] = %client.model
     ## Only the Claude 5 / Opus tiers accept an effort setting; Haiku 4.5
@@ -208,7 +214,7 @@ proc curlySender(client: LlmClient, requests: seq[LlmRequest],
   result = newSeq[LlmReply](requests.len)
   var batch: RequestBatch
   for index, request in requests:
-    let built = client.requestFor(request.system, request.user)
+    let built = client.requestFor(request.system, request.user, request.seat)
     batch.post(built.url, built.headers, built.body, $index)
   let started = int(epochTime() * 1000.0)
   let responses = client.curl.makeRequests(batch, timeoutSeconds)
@@ -227,6 +233,13 @@ proc newLlmClient*(config: GameConfig): LlmClient =
   result = LlmClient(model: config.model,
                      maxOutputTokens: config.maxOutputTokens,
                      sender: curlySender)
+  let sidecarEndpoint = getEnv("COWORLD_LLM_ENDPOINT").strip()
+  if sidecarEndpoint.len > 0:
+    result.transport = ltSidecar
+    result.sidecarEndpoint = sidecarEndpoint.strip(chars = {'/'}, leading = false)
+    result.model = getEnv("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5")
+    result.curl = newCurly()
+    return
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
   if bedrockEndpoint.len > 0 or bedrockToken.len > 0:
