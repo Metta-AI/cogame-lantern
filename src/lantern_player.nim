@@ -24,6 +24,7 @@ aim "track" and stay on it - half a second in the beam is a find.
 
 
 type PlayerCall = object
+  selection: PromptSelection
   socket: ptr NativeWebSocket
   decisionId, view, prompt, policy: string
   deadline: MonoTime
@@ -46,7 +47,7 @@ proc joinWorker() =
 
 proc runDecision(call: PlayerCall) {.gcsafe.} =
   defer: workerFinished.store(true)
-  let client = newLlmClient()
+  let client = newLlmClient(call.selection)
   let view = parseJson(call.view)
   var reply = %*{"type": "action", "protocol": "lantern.player.v3",
     "decision_id": call.decisionId, "source": "fallback",
@@ -127,6 +128,7 @@ when isMainModule:
   if registered.kind != wsReady:
     closeNativeWebSocket(socket)
     quit(0)
+  var episodeSelection: Option[PromptSelection]
   var decisionId = newJNull()
   var acknowledged = false
   var cleanupBudgetMs = 0
@@ -155,6 +157,11 @@ when isMainModule:
       of "decision":
         if acknowledged or kind != "prompt":
           raise newException(ValueError, "decision does not belong to an active prompt player")
+        let selection = promptSelection(payload["prompt_configuration"])
+        if episodeSelection.isSome:
+          doAssert episodeSelection.get() == selection, "wording changed within the episode"
+        else:
+          episodeSelection = some(selection)
         let issuedId = payload["decision_id"]
         if issuedId.kind != JString or issuedId.getStr().len == 0:
           raise newException(ValueError, "decision identity must be a nonempty string")
@@ -168,7 +175,7 @@ when isMainModule:
         decisionId = issuedId
         withLock evidenceLock: workerEvidence.setLen(0)
         workerFinished.store(false)
-        createThread(worker, runDecision, PlayerCall(socket: socket.addr,
+        createThread(worker, runDecision, PlayerCall(socket: socket.addr, selection: selection,
           decisionId: decisionId.getStr(), view: $payload["observation"], prompt: prompt,
           policy: (if label.len > 0: label else: "prompt"), retry: payload["attempt"].getInt() > 1,
           slot: payload["slot"].getInt(), deadline: receivedAt + initDuration(milliseconds = budget)))

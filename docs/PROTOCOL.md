@@ -32,6 +32,7 @@ informational `turn` frame. The final frame carries results:
 
 {"type": "decision", "protocol": "lantern.player.v3", "decision_id": "lantern-2040-0-1",
  "slot": 0, "role": "hider", "attempt": 1, "transport": {"budget_ms": 8500, "cleanup_budget_ms": 5000},
+ "prompt_configuration": {"promptVariant": "canonical", "promptSeed": 0},
  "observation": { …private seat view… }}
 
 {"type": "action", "protocol": "lantern.player.v3", "decision_id": "lantern-2040-0-1",
@@ -45,6 +46,9 @@ informational `turn` frame. The final frame carries results:
 ```
 
 The `turn` frame is informational. Scripted seats receive no decision request.
+The game selects one rules wording for the episode. The native player consumes
+`prompt_configuration` and rejects changes between decisions. This configuration
+does not enter the private view or alter simulation randomness.
 With no native sidecar endpoint, a model player replies with `source: "fallback"`
 and `cause: "no_endpoint"`. The game applies its warden baseline and
 records the cause.

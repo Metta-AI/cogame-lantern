@@ -6,28 +6,35 @@ the hosted player:
 
 ```bash
 nimby sync nimby.lock
-nim r -d:release --path:src tools/export_posttrain.nim /tmp/lantern-default 10 1 default
-nim r -d:release --path:src tools/export_posttrain.nim /tmp/lantern-sprint 10 1 sprint
+nim r -d:release --path:src tools/export_posttrain.nim /private/lantern-default 10 1 default SOURCE_GAME_VERSION plain 0
+nim r -d:release --path:src tools/export_posttrain.nim /private/lantern-sprint 10 1 sprint SOURCE_GAME_VERSION mixed 3
 ```
 
 The exporter reads each certified `game_config` from
 `coworld_manifest_template.json`, runs ten seeded matches per variant, and
-writes `train.jsonl`, `validation.jsonl`, and `manifest.json`. Seeds divisible
-by five go to validation, keeping each match entirely in one split. The
-published warden and moth scripts alternate by seat. Each order passes through
-the hosted parser and the production control compiler before it advances the
-native simulator. The exporter refuses an existing output directory.
+writes private canonical trajectories, per-match replay files, and `manifest.json`.
+The teacher sees only each seat's private observation. Orders pass through the
+hosted parser and production controller. Every replay is independently re-derived.
+The exporter requires committed, clean source and refuses an existing output directory.
 
-Train the text policy with Metta's post-training CLI:
+Candidates require independent content review. The shared importer owns training
+labels and seed-family splits; wording and game variants share `lantern-SEED`
+families. Source exports do not establish deployed package parity or model quality.
 
-```bash
-uv run python -m metta_posttrain.train --dataset /tmp/lantern-default \
-  --output /tmp/lantern-model --model Qwen/Qwen2.5-0.5B-Instruct \
-  --max-steps 100 --max-length 4096
-```
+Set `promptVariant` and `promptSeed` in game configuration or bridge resets.
+The `lantern-rules-v1` bank has five training variants: `canonical`, `plain`,
+`numbered`, `questions`, and `reordered`. `mixed` resolves once per episode using
+the separate prompt seed modulo five. It requires an explicit nonnegative seed.
+Canonical wording remains byte-identical. Only the setting introduction varies;
+mechanics, role rules, response schema, private views, and simulation randomness remain unchanged.
 
-The dataset is imitation of scripted play; its loss does not measure policy
-quality.
+`heldout-briefing` and `heldout-reference` are evaluation-only variants. Training
+resets and source candidate exports reject them. Private captures retain selection
+metadata and hashes of actual system/user messages, including retries and late evidence.
+The native player rejects a selection change within an episode.
+
+Compare matched seeds across training and held-out wording before making performance
+claims. Local scripted and HTTP-fixture checks do not establish resistance to training collapse.
 
 # Numeric training
 

@@ -3,7 +3,8 @@
 
 import std/[base64, json, math, monotimes, options, os, sets, strutils, tables]
 import bitworld/[decision_trajectory, native_http]
-import types, orders
+import types, orders, prompts
+export prompts
 from std/unicode import validateUtf8
 
 const
@@ -39,7 +40,11 @@ line of sight. Pushing and running make noise; crawling does not.
 """
 
 
+proc systemPromptFor*(selection: PromptSelection): string =
+  selection.introduction() & SystemPrompt[PromptSelection().introduction().len .. ^1]
+
 type LlmClient* = ref object
+  selection: PromptSelection
   sidecarEndpoint: string
   model*: string
   maxOutputTokens*: int
@@ -47,8 +52,8 @@ type LlmClient* = ref object
   temperature*: float
   lastAttempt*: DecisionAttempt
 
-proc newLlmClient*(): LlmClient =
-  result = LlmClient(
+proc newLlmClient*(selection: PromptSelection): LlmClient =
+  result = LlmClient(selection: selection,
     temperature: parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "0.4")),
     model: getEnv("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5"),
     maxOutputTokens: getEnv("PLAYER_MAX_OUTPUT_TOKENS", "900").parseInt())
@@ -76,13 +81,13 @@ proc call*(client: LlmClient, view: JsonNode, prompt: string,
   let user = userPrompt(view, prompt, retry)
   let body = %*{"max_tokens": client.maxOutputTokens,
     "temperature": client.temperature, "model": client.model,
-    "system": SystemPrompt, "messages": [{"role": "user", "content": user}]}
+    "system": systemPromptFor(client.selection), "messages": [{"role": "user", "content": user}]}
   var headers: HttpHeaders
   headers["content-type"] = "application/json"
   headers["anthropic-version"] = AnthropicVersion
   headers["X-Coworld-Player-Slot"] = $slot
   let url = client.sidecarEndpoint & "/v1/messages"
-  client.lastAttempt.prompt = %*[{"role": "system", "content": SystemPrompt},
+  client.lastAttempt.prompt = %*[{"role": "system", "content": systemPromptFor(client.selection)},
     {"role": "user", "content": user}]
   client.lastAttempt.request = copy(body)
   client.lastAttempt.model = some(client.model)

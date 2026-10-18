@@ -26,6 +26,7 @@ import types, arena, sim, rules, control, orders, decision,
 
 type
   GameState = object
+    selection: PromptSelection
     config: GameConfig
     sim: Sim
     roster: Roster
@@ -303,7 +304,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
           let decisions =
             if seats.len == 0: @[]
-            else: decideAll(simRef, half, seats, scripted,
+            else: decideAll(state.selection, simRef, half, seats, scripted,
                             guardEngaged, exchangeDecisions)
           if interruptionRequested():
             reason = erDeadline
@@ -434,7 +435,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           if attempt.origin in {aoTeacher, aoHuman}: attempt.origin = aoUnknown
           attempt.accepted = false
           attempt.rejectionReason = some("episode stopped before engine order installation")
-          trajectory.recordDecision(id, $slot, state.decisionObservations[id], @[attempt],
+          trajectory.recordDecision(id, $slot,
+            privateObservation(state.selection, state.decisionObservations[id], @[attempt]), @[attempt],
             none(string), newJNull(), asMissing, terminal = true)
         var outcomes = newJObject()
         for slot in 0 ..< config.numAgents: outcomes[$slot] = results["scores"][slot]
@@ -714,9 +716,9 @@ proc websocketHandler(
                     if not prefix.endsWith("\n\n"):
                       raise newException(ValueError, "native guidance differs from production renderer")
                     guidance = prefix[0 ..< prefix.len - 2]
-                  let expected = %*[{"role": "system", "content": SystemPrompt},
+                  let expected = %*[{"role": "system", "content": systemPromptFor(state.selection)},
                     {"role": "user", "content": userPrompt(view, guidance, retry)}]
-                  if attempt.prompt != expected or attempt.request["system"] != %SystemPrompt or
+                  if attempt.prompt != expected or attempt.request["system"] != %systemPromptFor(state.selection) or
                       attempt.request["messages"] != %*[{"role": "user", "content": user}]:
                     raise newException(ValueError, "native prompt differs from production renderer")
                 state.pendingAttempts[id] = evidence
@@ -871,10 +873,11 @@ proc runReplayServer*(runtimeConfig: RuntimeConfig, episodeDeadline: MonoTime) =
     requestNativeStop()
     if ownerCreated: joinThread(replayOwner)
 
-proc prepareState*(config: GameConfig) =
+proc prepareState*(config: GameConfig, selection: PromptSelection) =
   ## Everything runGameServer does before it opens a socket. Exposed so
   ## tests/test_server.nim can exercise the websocket contract without an episode
   ## owner closing the shared server.
+  state.selection = selection
   state.config = config
   state.sim = newSim(config, loadMapSpec(config.mapPath))
   state.roster = initRoster(config)
@@ -904,7 +907,7 @@ proc prepareState*(config: GameConfig) =
 
 proc serveForTests*(config: GameConfig, port: int, host = "127.0.0.1") =
   ## Blocking. Call `stopTestServer()` from another thread to end it.
-  prepareState(config)
+  prepareState(config, PromptSelection())
   let router = buildRouter(replayMode = false)
   gameServer = newServer(router, websocketHandler, workerThreads = 2, maxMessageLen = 16 * 1024 * 1024)
   gameServer.serve(Port(port), host)
@@ -919,7 +922,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig,
   assertFileUri("COGAME_METRICS_URI")
   if config.tokens.len < config.numAgents:
     raise newException(LanternError, "tokens and players must align")
-  prepareState(config)
+  prepareState(config, promptSelection(parseJson(runtimeConfig.config)))
   state.episodeDeadline = episodeDeadline
   state.runtimeInputs = copy(runtimeInputs)
 
