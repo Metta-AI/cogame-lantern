@@ -11,9 +11,10 @@ const
   AnthropicVersion = "2023-06-01"
   SystemPrompt* = """
 You are one cog in a 3v3 hide-and-seek match on a dark warehouse floor, 1235 by 659
-pixels, x right, y down. Each half has two acts. In the BUILD act (30 s) the hiding
+pixels, x right, y down. Each half has two acts; their remaining times are in your observation's clock.
+In the BUILD act the hiding
 team has the lights on and can shove and bolt down 48x48 crates; the seeking team is
-locked in its pen. In the HUNT act (75 s) the lights go out, the pen opens, and the
+locked in its pen. In the HUNT act the lights go out, the pen opens, and the
 seekers sweep the dark with flashlights. A hider scores one point per tick it is not
 yet found. Held in a beam for half a second, or touched, and you are found. Sides swap
 at half time, so you will play both roles - your prompt must cover both.

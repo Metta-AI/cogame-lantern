@@ -51,6 +51,11 @@ def play(binary, variant, wording, seed, language, prompt_seed=0, original=False
         )
         while observation["kind"] == "decision":
             system, user = (message["content"] for message in observation["messages"])
+            if original:
+                system = system.replace(
+                    "Each half has two acts. In the BUILD act (30 s) the hiding",
+                    "Each half has two acts; their remaining times are in your observation's clock.\nIn the BUILD act the hiding",
+                ).replace("In the HUNT act (75 s)", "In the HUNT act")
             seat = observation["seat"]
             view = observation["semantic_view"]
             if not original:

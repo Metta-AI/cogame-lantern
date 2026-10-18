@@ -25,7 +25,9 @@ Set `promptVariant` and `promptSeed` in game configuration or bridge resets.
 The `lantern-rules-v1` bank has five training variants: `canonical`, `plain`,
 `numbered`, `questions`, and `reordered`. `mixed` resolves once per episode using
 the separate prompt seed modulo five. It requires an explicit nonnegative seed.
-Canonical wording remains byte-identical. Only the setting introduction varies;
+The shared rules now use the observation's clock: the old fixed 30/75-second
+claims were false for sprint's 20/45-second acts. Apart from that correction,
+canonical wording remains byte-identical. Only the setting introduction varies;
 mechanics, role rules, response schema, private views, and simulation randomness remain unchanged.
 
 `heldout-briefing` and `heldout-reference` are evaluation-only variants. Training
