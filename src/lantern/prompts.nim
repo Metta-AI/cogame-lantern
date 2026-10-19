@@ -17,7 +17,7 @@ type
     seed*: int
 
 const
-  PromptBankVersion* = "lantern-rules-v1"
+  PromptBankVersion* = "lantern-rules-v2"
 
 proc promptSelection*(node: JsonNode): PromptSelection =
   if node.kind != JObject:
@@ -47,14 +47,3 @@ proc promptMetadata*(selection: PromptSelection, system, user: string): JsonNode
 proc selectionMetadata*(selection: PromptSelection): JsonNode =
   %*{"bank": PromptBankVersion, "variant": $selection.selectedVariant,
     "selection": $selection.variant, "seed": selection.seed}
-
-proc introduction*(selection: PromptSelection): string =
-  case selection.selectedVariant
-  of pvCanonical: "You are one cog in a 3v3 hide-and-seek match on a dark warehouse floor, 1235 by 659\npixels, x right, y down."
-  of pvPlain: "You control one cog in 3v3 hide-and-seek on a dark warehouse floor.\nThe floor is 1235 by 659 pixels; x increases right and y increases down."
-  of pvNumbered: "1. You control one cog in a 3v3 hide-and-seek match.\n2. The setting is a dark warehouse floor, 1235 by 659 pixels.\n3. Coordinates increase right for x and down for y."
-  of pvQuestions: "Who are you? One cog in a 3v3 hide-and-seek match.\nWhere? A dark warehouse floor, 1235 by 659 pixels.\nHow are coordinates oriented? x right, y down."
-  of pvReordered: "The dark warehouse floor measures 1235 by 659 pixels, with x right and y down.\nYou control one cog in the 3v3 hide-and-seek match played here."
-  of pvHeldoutBriefing: "Match briefing: play one cog in 3v3 hide-and-seek on a dark warehouse floor.\nFloor dimensions are 1235 by 659 pixels. The x axis points right; the y axis points down."
-  of pvHeldoutReference: "Assignment: one cog. Match: 3v3 hide-and-seek. Location: dark warehouse floor.\nDimensions: 1235 by 659 pixels. Coordinates: x right, y down."
-  of pvMixed: raise newException(Defect, "unresolved mixed wording")

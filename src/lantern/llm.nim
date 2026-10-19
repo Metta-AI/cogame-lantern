@@ -9,7 +9,7 @@ from std/unicode import validateUtf8
 
 const
   AnthropicVersion = "2023-06-01"
-  SystemPrompt* = """
+  CanonicalBriefing = """
 You are one cog in a 3v3 hide-and-seek match on a dark warehouse floor, 1235 by 659
 pixels, x right, y down. Each half has two acts; their remaining times are in your observation's clock.
 In the BUILD act the hiding
@@ -21,7 +21,8 @@ at half time, so you will play both roles - your prompt must cover both.
 Every 5 seconds you issue ONE order. A deterministic controller executes it for the
 next 5 seconds: it steers you to your target, turns your aim, and holds the lock or pry
 button when the order says so. You do not drive motors directly.
-Reply with a single JSON object and NOTHING else. Your reply MUST begin with '{'.
+"""
+  ReplyRules = """Reply with a single JSON object and NOTHING else. Your reply MUST begin with '{'.
 Schema:
 {"intent":"<one of the legal intents for your role>",
  "target":[x,y],          // a point on the floor; clamped into the map
@@ -42,7 +43,29 @@ line of sight. Pushing and running make noise; crawling does not.
 
 
 proc systemPromptFor*(selection: PromptSelection): string =
-  selection.introduction() & SystemPrompt[PromptSelection().introduction().len .. ^1]
+  if selection.selectedVariant == pvCanonical:
+    return CanonicalBriefing & ReplyRules
+  let arena = "You control one cog in a three-versus-three hide-and-seek game. The dark " &
+    "warehouse is 1235 by 659 pixels, with x increasing right and y increasing down."
+  let phases = "Each half has BUILD and HUNT acts; read the remaining durations from the " &
+    "observation clock. During BUILD the hiders have light and can push and bolt " &
+    "48-by-48 crates while seekers remain locked in their pen. During HUNT the lights " &
+    "go out, the pen opens, and seekers search with flashlights."
+  let scoring = "A hider earns one hidden tick for every tick before being found. Half a " &
+    "second continuously in seeker light, or seeker contact, finds the hider. Sides " &
+    "swap at halftime, so prepare to hide and seek."
+  let control = "Submit one order every five seconds. For the next five seconds a " &
+    "deterministic controller steers toward your target, turns your aim, and holds " &
+    "lock or pry when requested. You do not control motors directly."
+  result = case selection.selectedVariant
+    of pvPlain: arena & "\n\n" & phases & "\n\n" & scoring & "\n\n" & control
+    of pvNumbered: "1. Arena\n" & arena & "\n2. Acts\n" & phases & "\n3. Finding and scoring\n" & scoring & "\n4. Control\n" & control
+    of pvQuestions: "Where do I play?\n" & arena & "\nHow does a half work?\n" & phases & "\nWhat counts as success?\n" & scoring & "\nHow do I act?\n" & control
+    of pvReordered: "FINDING AND SCORING\n" & scoring & "\nORDERS\n" & control & "\nMATCH PHASES\n" & phases & "\nARENA\n" & arena
+    of pvHeldoutBriefing: "Prepare your orders.\n" & control & "\nUnderstand the floor.\n" & arena & "\nFollow the acts.\n" & phases & "\nAccount for detection.\n" & scoring
+    of pvHeldoutReference: "Phase reference: " & phases & "\nScoring reference: " & scoring & "\nArena reference: " & arena & "\nControl reference: " & control
+    of pvCanonical, pvMixed: raise newException(ValueError, "alternate wording must resolve")
+  result.add("\n" & ReplyRules)
 
 type LlmClient* = ref object
   selection: PromptSelection

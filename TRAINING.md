@@ -12,23 +12,24 @@ nim r -d:release --path:src tools/export_posttrain.nim /private/lantern-sprint 1
 
 The exporter reads each certified `game_config` from
 `coworld_manifest_template.json`, runs ten seeded matches per variant, and
-writes private canonical trajectories, per-match replay files, and `manifest.json`.
+writes the original combined private trajectories and `manifest.json`.
 The teacher sees only each seat's private observation. Orders pass through the
-hosted parser and production controller. Every replay is independently re-derived.
-The exporter requires committed, clean source and refuses an existing output directory.
+hosted parser and production controller. Run from clean committed source to make
+the recorded revision reproducible. Existing output directories are refused.
 
 Candidates require independent content review. The shared importer owns training
 labels and seed-family splits; wording and game variants share `lantern-SEED`
 families. Source exports do not establish deployed package parity or model quality.
 
 Set `promptVariant` and `promptSeed` in game configuration or bridge resets.
-The `lantern-rules-v1` bank has five training variants: `canonical`, `plain`,
+The `lantern-rules-v2` bank has five training variants: `canonical`, `plain`,
 `numbered`, `questions`, and `reordered`. `mixed` resolves once per episode using
 the separate prompt seed modulo five. It requires an explicit nonnegative seed.
 The shared rules now use the observation's clock: the old fixed 30/75-second
 claims were false for sprint's 20/45-second acts. Apart from that correction,
-canonical wording remains byte-identical. Only the setting introduction varies;
-mechanics, role rules, response schema, private views, and simulation randomness remain unchanged.
+canonical wording remains byte-identical. Complete arena, phase, detection, scoring, and control explanations vary in wording
+and section order. The role-specific action schema stays fixed. Mixed exports cycle
+the five training presentations independently of game seeds.
 
 `heldout-briefing` and `heldout-reference` are evaluation-only variants. Training
 resets and source candidate exports reject them. Private captures retain selection

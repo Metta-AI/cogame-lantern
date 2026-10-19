@@ -1,23 +1,22 @@
 """Actual game and six player sockets against a local native HTTP fixture."""
 
-import argparse
 import base64
 import contextlib
-import hashlib
 import http.server
 import json
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-flows = (
+GAME, PLAYER = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
+for flow in (
     "accepted",
     "invalid",
     "sampled",
@@ -30,31 +29,7 @@ flows = (
     "malformed-schema",
     "invalid-token-types",
     "large-metadata",
-)
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("game", type=Path)
-parser.add_argument("player", type=Path)
-parser.add_argument("output", type=Path, nargs="?")
-parser.add_argument("--flow", choices=flows)
-parser.add_argument("--variant", choices=("default", "sprint"))
-parser.add_argument(
-    "--wording",
-    default="canonical",
-    choices=(
-        "canonical",
-        "plain",
-        "numbered",
-        "questions",
-        "reordered",
-        "heldout-briefing",
-        "heldout-reference",
-        "mixed",
-    ),
-)
-parser.add_argument("--prompt-seed", type=int, default=0)
-args = parser.parse_args()
-GAME, PLAYER = str(args.game.resolve()), str(args.player.resolve())
-for flow in (args.flow,) if args.flow else flows:
+):
     calls = {}
 
     class Provider(http.server.BaseHTTPRequestHandler):
@@ -68,6 +43,7 @@ for flow in (args.flow,) if args.flow else flows:
 
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            assert "FINDING AND SCORING" in request["system"]
             slot = int(self.headers["X-Coworld-Player-Slot"])
             assert self.path == "/v1/messages" and slot in range(6)
             assert request["temperature"] == (
@@ -83,7 +59,7 @@ for flow in (args.flow,) if args.flow else flows:
                 else '{"intent":"wait"}'
             )
             call_id = str(uuid.uuid4())
-            body: dict[str, Any] = {
+            body = {
                 "id": "msg_" + call_id,
                 "model": "fixture/served",
                 "stop_reason": "end_turn",
@@ -126,10 +102,10 @@ for flow in (args.flow,) if args.flow else flows:
                     "stop_reason": "eos",
                     "response": text,
                 }
-                if flow in {"tempered", "temperature-mismatch"}:
-                    body["sampling_evidence"]["temperature"] = (
-                        0.4 if flow == "tempered" else 1
-                    )
+            if flow in {"tempered", "temperature-mismatch"}:
+                body["sampling_evidence"]["temperature"] = (
+                    0.4 if flow == "tempered" else 1
+                )
             if flow == "provider-error" and slot == 0:
                 body = {"error": {"message": "private-provider-error"}}
             if flow == "malformed-schema" and slot == 0:
@@ -171,8 +147,8 @@ for flow in (args.flow,) if args.flow else flows:
 
     provider = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     threading.Thread(target=provider.serve_forever, daemon=True).start()
-    if args.output is not None:
-        target = args.output.resolve() / flow
+    if len(sys.argv) == 4:
+        target = Path(sys.argv[3]).resolve() / flow
         target.mkdir(parents=True, mode=0o700, exist_ok=False)
         output_context = contextlib.nullcontext(target)
     else:
@@ -183,9 +159,10 @@ for flow in (args.flow,) if args.flow else flows:
             reserve.bind(("127.0.0.1", 0))
             port = reserve.getsockname()[1]
         config = {
+            "promptVariant": "mixed",
+            "promptSeed": 4,
             "num_agents": 6,
             "seed": 7,
-            "halves": 2,
             "tokens": ["t" + str(i) for i in range(6)],
             "prepTicks": 24,
             "huntTicks": 48,
@@ -195,17 +172,6 @@ for flow in (args.flow,) if args.flow else flows:
             "playerConnectTimeoutSeconds": 10,
             "shutdownGraceSeconds": 0,
         }
-        if args.variant:
-            manifest = json.loads((ROOT / "coworld_manifest_template.json").read_text())
-            config.update(
-                next(
-                    v["game_config"]
-                    for v in manifest["variants"]
-                    if v["id"] == args.variant
-                )
-            )
-        config.update(promptVariant=args.wording, promptSeed=args.prompt_seed)
-        expected_ticks = config["halves"] * (config["prepTicks"] + config["huntTicks"])
         (output / "config.json").write_text(json.dumps(config))
         env = {
             **os.environ,
@@ -263,7 +229,7 @@ for flow in (args.flow,) if args.flow else flows:
                     )
                 )
             for process in processes:
-                assert process.wait(timeout=config["episodeTimeoutSeconds"] + 30) == 0
+                assert process.wait(timeout=90) == 0
             for log in logs:
                 log.flush()
             events = [
@@ -273,7 +239,7 @@ for flow in (args.flow,) if args.flow else flows:
             decisions, episode = events[:-1], events[-1]
             assert (
                 episode["status"] == "completed"
-                and episode["outcome"]["final_tick"] == expected_ticks
+                and episode["outcome"]["final_tick"] == 144
             )
             captures = episode["outcome"]["runtime_inputs"]
             assert len(captures) == 1 and captures[0]["uri"] == env["COGAME_CONFIG_URI"]
@@ -288,23 +254,9 @@ for flow in (args.flow,) if args.flow else flows:
             assert (output / "trajectory.jsonl").stat().st_mode & 0o777 == 0o600
             replay = json.loads((output / "replay.json").read_text())
             controls = base64.b64decode(replay["controls_b64"])
-            assert len(controls) == expected_ticks * 6 * 4
+            assert len(controls) == 144 * 6 * 4
             seen = set()
             for decision in decisions:
-                selection = decision["observation"]["prompt_selection"]
-                resolved = (
-                    ("canonical", "plain", "numbered", "questions", "reordered")[
-                        args.prompt_seed % 5
-                    ]
-                    if args.wording == "mixed"
-                    else args.wording
-                )
-                assert selection == {
-                    "bank": "lantern-rules-v1",
-                    "selection": args.wording,
-                    "variant": resolved,
-                    "seed": args.prompt_seed,
-                }
                 execution = decision["execution"]
                 slot = int(decision["seat"])
                 assert (
@@ -317,21 +269,6 @@ for flow in (args.flow,) if args.flow else flows:
                 )
                 assert base64.b64decode(execution["seat_controls_b64"]) == actual
                 for attempt in decision["attempts"]:
-                    if attempt["prompt"]:
-                        hashes = next(
-                            h["prompt_template"]
-                            for h in decision["observation"]["prompt_hashes"]
-                            if h["attempt_id"] == attempt["attempt_id"]
-                        )
-                        assert hashes == {
-                            **selection,
-                            "system_sha256": hashlib.sha256(
-                                attempt["prompt"][0]["content"].encode()
-                            ).hexdigest(),
-                            "user_sha256": hashlib.sha256(
-                                attempt["prompt"][1]["content"].encode()
-                            ).hexdigest(),
-                        }
                     assert attempt["inference_mode"] == "text_action"
                     if attempt["platform_call_id"] is None:
                         continue

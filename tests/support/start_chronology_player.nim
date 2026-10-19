@@ -24,9 +24,9 @@ while true:
     let user = userPrompt(packet["observation"], "", packet["attempt"].getInt() > 1)
     let response = "{\"intent\":\"wait\"}"
     var attempt = newDecisionAttempt(id & "-model", "chronology-fixture", aoModel)
-    attempt.prompt = %*[{"role": "system", "content": SystemPrompt},
+    attempt.prompt = %*[{"role": "system", "content": systemPromptFor(PromptSelection())},
       {"role": "user", "content": user}]
-    attempt.request = %*{"model": "fixture/asserted", "system": SystemPrompt,
+    attempt.request = %*{"model": "fixture/asserted", "system": systemPromptFor(PromptSelection()),
       "messages": [{"role": "user", "content": user}], "temperature": 0,
       "max_tokens": 900}
     attempt.decoder = %*{"temperature": 0, "max_tokens": 900}

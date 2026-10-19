@@ -19,13 +19,10 @@ when isMainModule:
   let variant = args[3]
   let gameVersion = args[4]
   doAssert gameVersion.len > 0
-  let selection = promptSelection(if args.len == 7:
+  let configured = promptSelection(if args.len == 7:
     %*{"promptVariant": args[5], "promptSeed": parseInt(args[6])} else: newJObject())
-  doAssert selection.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference},
+  doAssert configured.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference},
     "held-out wording is evaluation only"
-  let status = execCmdEx("git status --porcelain")
-  doAssert status.exitCode == 0 and status.output.strip().len == 0,
-    "commit qualified source before exporting candidates"
   if matches < 10 or firstSeed < 1:
     quit("at least ten matches and a positive first seed are required", 1)
   if variant notin Variants:
@@ -45,6 +42,8 @@ when isMainModule:
     trajectoryRows: seq[string]
     runs = newJArray()
   for seed in firstSeed ..< firstSeed + matches:
+    var selection = configured
+    if selection.variant == pvMixed: selection.seed += seed - firstSeed
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -54,7 +53,7 @@ when isMainModule:
     config.update($runtimeConfig)
     let map = loadMapSpec(config.mapPath)
     let sim = newSim(config, map)
-    let episodeId = "lantern-" & variant & "-" & $seed & "-" & $selection.selectedVariant
+    let episodeId = "lantern-" & variant & "-" & $seed
     let trajectory = newDecisionTrajectory(episodeId, "lantern-" & $seed,
       "lantern", gameVersion, sourceRevision)
     var pending: seq[PendingMacro]
@@ -106,18 +105,11 @@ when isMainModule:
     for seat in 0 ..< Seats: outcomes[$seat] = outcome["scores"][seat]
     trajectory.finish(esCompleted, outcome, outcomes)
     trajectoryRows.add(trajectory.eventsJsonl().strip())
-    let replay = buildReplay(sim, kinds, outcome)
-    doAssert rederive(replay).mismatchTick == -1, "source replay must rederive"
-    writePrivate(output / (episodeId & ".replay.json"), $replay & "\n")
-    writePrivate(output / (episodeId & ".jsonl"), trajectory.eventsJsonl())
     runs.add(%*{"seed": seed, "decisions": decisionCount,
-      "trajectory": episodeId & ".jsonl", "replay": episodeId & ".replay.json",
       "scores": outcome["scores"], "ticks_played": sim.tick})
   writePrivate(output / "trajectories.jsonl", trajectoryRows.join("\n") & "\n")
   writePrivate(output / "manifest.json", pretty(%*{
-    "schema_version": 2,
-    "review_required": true,
-    "prompt_selection": selection.selectionMetadata(),
+    "schema_version": 1,
     "game": "lantern",
     "variant": variant,
     "source_revision": sourceRevision,

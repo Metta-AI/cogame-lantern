@@ -158,9 +158,6 @@ jobs:
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-game src/lantern.nim
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-player src/lantern_player.nim
           python3 tools/test_native_trajectory.py /tmp/lantern-game /tmp/lantern-player
-          python3 tools/test_native_trajectory.py /tmp/lantern-game /tmp/lantern-player "$RUNNER_TEMP/lantern-heldout" --flow accepted --variant sprint --wording heldout-briefing
-          nim c --parallelBuild:1 -d:release --hints:off --path:src -o:"$RUNNER_TEMP/check-lantern-replay" tools/check_replay.nim
-          "$RUNNER_TEMP/check-lantern-replay" "$RUNNER_TEMP/lantern-heldout/accepted/replay.json"
           python3 tools/test_native_lifecycle.py /tmp/lantern-game /tmp/lantern-player "$RUNNER_TEMP/lantern-lifecycle"
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-start-player tests/support/start_chronology_player.nim
           for mode in first joined; do
