@@ -48,7 +48,7 @@ suite "ordinary player decisions":
     let sim = testSim(prep = 240, hunt = 480)
     reset(valid)
     let buildSeats = activeSeats(sim, 1, actBuild)
-    let decisions = decideAll(sim, 1, buildSeats,
+    let decisions = decideAll(PromptSelection(), sim, 1, buildSeats,
       newSeq[ScriptKind](sim.seats), false, exchange)
     check batches.len == 1
     check batches[0].len == TeamSize
@@ -62,7 +62,7 @@ suite "ordinary player decisions":
       check decisions[position].order.intent == inHide
     sim.jumpToHunt()
     reset(valid)
-    discard decideAll(sim, 1, activeSeats(sim, 1, actHunt),
+    discard decideAll(PromptSelection(), sim, 1, activeSeats(sim, 1, actHunt),
       newSeq[ScriptKind](sim.seats), false, exchange)
     check batches.len == 1
     check batches[0].len == Seats
@@ -72,7 +72,7 @@ suite "ordinary player decisions":
   test "an invalid action retries once and then plays warden":
     let sim = testSim()
     reset(invalid)
-    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+    let decisions = decideAll(PromptSelection(), sim, 1, activeSeats(sim, 1, actBuild),
       newSeq[ScriptKind](sim.seats), false, exchange)
     check deadlines == @[sim.config.attempt1Ms, sim.config.attempt2Ms]
     check batches.len == 2
@@ -85,7 +85,7 @@ suite "ordinary player decisions":
   test "missing replies share bounded deadlines":
     let sim = testSim()
     reset(missing)
-    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+    let decisions = decideAll(PromptSelection(), sim, 1, activeSeats(sim, 1, actBuild),
       newSeq[ScriptKind](sim.seats), false, exchange)
     check batches.len == 2
     check deadlines == @[8500, 3500]
@@ -96,7 +96,7 @@ suite "ordinary player decisions":
   test "credential-free players report fallback without a retry":
     let sim = testSim()
     reset(noCredentials)
-    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+    let decisions = decideAll(PromptSelection(), sim, 1, activeSeats(sim, 1, actBuild),
       newSeq[ScriptKind](sim.seats), false, exchange)
     check batches.len == 1
     for decision in decisions:
@@ -110,14 +110,14 @@ suite "ordinary player decisions":
     var scripted = newSeq[ScriptKind](sim.seats)
     let seats = activeSeats(sim, 1, actBuild)
     scripted[seats[0]] = skWarden
-    let decisions = decideAll(sim, 1, seats, scripted, false, exchange)
+    let decisions = decideAll(PromptSelection(), sim, 1, seats, scripted, false, exchange)
     check batches[0].len == TeamSize - 1
     check decisions[0].source == osScripted
 
   test "the budget guard keeps orders game-owned":
     let sim = testSim()
     reset(valid)
-    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+    let decisions = decideAll(PromptSelection(), sim, 1, activeSeats(sim, 1, actBuild),
       newSeq[ScriptKind](sim.seats), true, exchange)
     check batches.len == 0
     for decision in decisions:
@@ -226,7 +226,7 @@ suite "result and replay on interrupted episodes":
   test "interruption ends the shared retry budget before another request":
     let sim = testSim(prep = 240, hunt = 480)
     reset(canceled)
-    let decisions = decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+    let decisions = decideAll(PromptSelection(), sim, 1, activeSeats(sim, 1, actBuild),
       newSeq[ScriptKind](sim.seats), false, exchange)
     check batches.len == 1
     for decision in decisions:
@@ -239,7 +239,7 @@ suite "result and replay on interrupted episodes":
     let sim = testSim(prep = 240, hunt = 480)
     sim.config.turnBudgetMs = 100
     reset(invalid)
-    discard decideAll(sim, 1, activeSeats(sim, 1, actBuild),
+    discard decideAll(PromptSelection(), sim, 1, activeSeats(sim, 1, actBuild),
       newSeq[ScriptKind](sim.seats), false, exchange)
     check deadlines.len == 2
     check deadlines[0] <= 100 and deadlines[0] > 0

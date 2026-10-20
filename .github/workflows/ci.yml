@@ -149,6 +149,7 @@ jobs:
         run: |
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/lantern-train-bridge
+          python3 tools/test_prompt_games.py /tmp/lantern-train-bridge
           nim c -d:release --hints:off --path:src -o:/tmp/lantern-posttrain tools/export_posttrain.nim
           python3 tools/test_export_seed_family.py /tmp/lantern-posttrain
 

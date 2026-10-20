@@ -3,23 +3,26 @@
 
 import std/[base64, json, math, monotimes, options, os, sets, strutils, tables]
 import bitworld/[decision_trajectory, native_http]
-import types, orders
+import types, orders, prompts
+export prompts
 from std/unicode import validateUtf8
 
 const
   AnthropicVersion = "2023-06-01"
-  SystemPrompt* = """
+  CanonicalBriefing = """
 You are one cog in a 3v3 hide-and-seek match on a dark warehouse floor, 1235 by 659
-pixels, x right, y down. Each half has two acts. In the BUILD act (30 s) the hiding
+pixels, x right, y down. Each half has two acts; their remaining times are in your observation's clock.
+In the BUILD act the hiding
 team has the lights on and can shove and bolt down 48x48 crates; the seeking team is
-locked in its pen. In the HUNT act (75 s) the lights go out, the pen opens, and the
+locked in its pen. In the HUNT act the lights go out, the pen opens, and the
 seekers sweep the dark with flashlights. A hider scores one point per tick it is not
 yet found. Held in a beam for half a second, or touched, and you are found. Sides swap
 at half time, so you will play both roles - your prompt must cover both.
 Every 5 seconds you issue ONE order. A deterministic controller executes it for the
 next 5 seconds: it steers you to your target, turns your aim, and holds the lock or pry
 button when the order says so. You do not drive motors directly.
-Reply with a single JSON object and NOTHING else. Your reply MUST begin with '{'.
+"""
+  ReplyRules = """Reply with a single JSON object and NOTHING else. Your reply MUST begin with '{'.
 Schema:
 {"intent":"<one of the legal intents for your role>",
  "target":[x,y],          // a point on the floor; clamped into the map
@@ -39,7 +42,68 @@ line of sight. Pushing and running make noise; crawling does not.
 """
 
 
+proc systemPromptFor*(selection: PromptSelection): string =
+  if selection.selectedVariant == pvCanonical:
+    return CanonicalBriefing & ReplyRules
+  let arena = "You control one cog in a three-versus-three hide-and-seek game. The dark " &
+    "warehouse is 1235 by 659 pixels, with x increasing right and y increasing down."
+  let phases = "Each half has BUILD and HUNT acts; read the remaining durations from the " &
+    "observation clock. During BUILD the hiders have light and can push and bolt " &
+    "48-by-48 crates while seekers remain locked in their pen. During HUNT the lights " &
+    "go out, the pen opens, and seekers search with flashlights."
+  let scoring = "A hider earns one hidden tick for every tick before being found. Half a " &
+    "second continuously in seeker light, or seeker contact, finds the hider. Sides " &
+    "swap at halftime, so prepare to hide and seek."
+  let control = "Submit one order every five seconds. For the next five seconds a " &
+    "deterministic controller steers toward your target, turns your aim, and holds " &
+    "lock or pry when requested. You do not control motors directly."
+  result = case selection.selectedVariant
+    of pvPlain: arena & "\n\n" & phases & "\n\n" & scoring & "\n\n" & control
+    of pvNumbered: """1. Arena
+Play one cog on a team of three against three opponents in hide-and-seek. The warehouse floor is 1235 by 659 pixels; x increases to the right and y downward.
+2. Acts
+A half consists of BUILD followed by HUNT. The observation clock supplies remaining durations. BUILD gives hiders light and access to shove or bolt 48x48 crates; seekers are confined to their pen. HUNT turns off the lights and opens the pen for flashlight searches.
+3. Detection and score
+Each tick a hider remains unfound adds one hidden tick. Continuous seeker illumination for half a second, or contact with a seeker, finds the hider. Teams exchange roles at halftime; you must play both hiding and seeking.
+4. Orders
+Choose one order at five-second intervals. A deterministic controller carries it out for the next five seconds, steering to the target, rotating aim, and holding lock or pry when specified. Motor inputs are not yours to issue."""
+    of pvQuestions: """Where are you playing?
+You are one of three cogs opposing another trio in warehouse hide-and-seek. The dark floor measures 1235 by 659 pixels, with x going right and y going down.
+What happens in each half?
+First comes BUILD: lights are on for hiders, who can shove and bolt 48x48 crates, while seekers are locked in their pen. Then HUNT switches the lights off, releases seekers, and lets them search by flashlight. Check the observation clock for remaining act times.
+How is a hider found, and what scores?
+Half a second of continuous seeker light or seeker contact finds a hider. Every tick before detection earns that hider one hidden tick. At halftime the sides swap, so plan for both roles.
+How do you control your cog?
+Submit one order every five seconds. For the following five seconds, deterministic control steers toward your target, turns your aim, and holds lock or pry if requested. You do not directly operate motors."""
+    of pvReordered: """DETECTION AND SCORING
+Unfound hiders accumulate one hidden tick per tick. A hider is found through seeker contact or half a second continuously lit by seekers. Halftime exchanges the teams' roles; each cog both hides and seeks.
+CONTROL
+One order covers the next five seconds, and you submit a new one every five seconds. The deterministic controller handles steering to your target, turning aim, and holding the requested lock or pry button. You choose orders rather than motor inputs.
+ACTS
+Read remaining durations from the observation clock. Each half starts with BUILD: hiders have lights and can shove or bolt 48x48 crates; seekers stay locked in their pen. HUNT follows with darkness, an open pen, and flashlight searches by the seekers.
+ARENA
+Your cog belongs to one of two three-cog teams playing hide-and-seek. The warehouse is 1235 by 659 pixels; increasing x is right and increasing y is down."""
+    of pvHeldoutBriefing: """Order briefing
+Direct your cog with a single order once every five seconds. Deterministic control executes that order over the next five seconds: travel toward the target, aim rotation, and sustained lock or pry when called for. Direct motor control is unavailable.
+Floor briefing
+You participate as one cog in a three-on-three hide-and-seek contest. The dark warehouse spans 1235 pixels horizontally and 659 vertically. Coordinates increase rightward in x and downward in y.
+Half briefing
+There are two acts per half, with time remaining given by the observation clock. BUILD keeps seekers penned while hiders work in light to shove and bolt 48x48 crates. HUNT removes the light, opens the pen, and sends seekers searching with flashlights.
+Outcome briefing
+A hider receives one hidden tick for each tick it has not been found. Being continuously illuminated by seekers for half a second or contacted by a seeker ends that unfound state. The sides reverse at halftime, giving you both roles."""
+    of pvHeldoutReference: """Act reference
+Half sequence: BUILD, then HUNT. Remaining duration source: observation clock. BUILD conditions: lights on for hiders, 48x48 crates available to shove and bolt, seekers locked in pen. HUNT conditions: lights out, pen open, seekers searching with flashlights.
+Score reference
+Accrual: one hidden tick per unfound hider per tick. Detection: half a second of continuous seeker light, or seeker contact. Role schedule: teams switch at halftime; every cog plays both sides.
+Arena reference
+Contest: hide-and-seek, three cogs versus three. Controlled participant: one cog. Warehouse dimensions: 1235 by 659 pixels. Axes: +x right, +y down.
+Order reference
+Decision interval and execution duration: five seconds each. Input: one order. Deterministic execution: steer to target, turn aim, hold lock or pry as requested. Motor inputs: not directly controlled."""
+    of pvCanonical, pvMixed: raise newException(ValueError, "alternate wording must resolve")
+  result.add("\n" & ReplyRules)
+
 type LlmClient* = ref object
+  selection: PromptSelection
   sidecarEndpoint: string
   model*: string
   maxOutputTokens*: int
@@ -47,8 +111,8 @@ type LlmClient* = ref object
   temperature*: float
   lastAttempt*: DecisionAttempt
 
-proc newLlmClient*(): LlmClient =
-  result = LlmClient(
+proc newLlmClient*(selection: PromptSelection): LlmClient =
+  result = LlmClient(selection: selection,
     temperature: parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "0.4")),
     model: getEnv("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5"),
     maxOutputTokens: getEnv("PLAYER_MAX_OUTPUT_TOKENS", "900").parseInt())
@@ -76,13 +140,13 @@ proc call*(client: LlmClient, view: JsonNode, prompt: string,
   let user = userPrompt(view, prompt, retry)
   let body = %*{"max_tokens": client.maxOutputTokens,
     "temperature": client.temperature, "model": client.model,
-    "system": SystemPrompt, "messages": [{"role": "user", "content": user}]}
+    "system": systemPromptFor(client.selection), "messages": [{"role": "user", "content": user}]}
   var headers: HttpHeaders
   headers["content-type"] = "application/json"
   headers["anthropic-version"] = AnthropicVersion
   headers["X-Coworld-Player-Slot"] = $slot
   let url = client.sidecarEndpoint & "/v1/messages"
-  client.lastAttempt.prompt = %*[{"role": "system", "content": SystemPrompt},
+  client.lastAttempt.prompt = %*[{"role": "system", "content": systemPromptFor(client.selection)},
     {"role": "user", "content": user}]
   client.lastAttempt.request = copy(body)
   client.lastAttempt.model = some(client.model)

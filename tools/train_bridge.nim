@@ -200,6 +200,7 @@ proc hostedOrder(candidate: JsonNode): JsonNode =
     candidate["target_y"]], "crate": candidate["crate"],
     "aim": candidate["aim"], "crawl": candidate["crawl"]}
 
+var selection: PromptSelection
 var languageMode = false
 var operatorPrompt = OperatorPrompt
 
@@ -213,12 +214,15 @@ proc decision(view: JsonNode, seat, id: int, retry = false): JsonNode =
   result = %*{"kind": "decision", "game": "lantern", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": view["turn"],
     "semantic_view": view, "inbox": [],
-    "messages": [{"role": "system", "content": SystemPrompt},
+    "messages": [{"role": "system", "content": systemPromptFor(selection)},
       {"role": "user", "content": userPrompt(view, operatorPrompt, retry)}],
     "speech_messages": [],
     "action_schema": {"type": "object", "properties": properties,
       "required": required}, "typed_question": newJNull(),
     "inference_mode": newJNull()}
+  result["semantic_view"] = copy(view)
+  result["semantic_view"]["prompt_template"] = selection.promptMetadata(
+    result["messages"][0]["content"].getStr(), result["messages"][1]["content"].getStr())
   if languageMode:
     result["inference_mode"] = %"text_action"
     result["action_schema"] = %*{"type": "object", "properties": {
@@ -252,6 +256,11 @@ when isMainModule:
     var response: JsonNode
     case request["kind"].getStr()
     of "reset":
+      selection = promptSelection(request)
+      if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+        doAssert request.hasKey("split") and
+          request["split"].getStr() in ["evaluation", "validation", "test"],
+          "held-out wording requires an explicit evaluation split"
       doAssert request["players"].getInt() == Seats
       var gameConfig = defaultGameConfig()
       let runtime = copy(variantConfig)

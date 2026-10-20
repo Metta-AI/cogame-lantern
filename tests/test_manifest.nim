@@ -145,7 +145,7 @@ suite "the platform contract":
     check manifest["player"][0]["env"]["PLAYER_SCRIPTED"].getStr() == "warden"
     check "image: coworld-lantern:latest" in composeText
     check "platform: linux/amd64" in composeText
-    check "network: host" in composeText
+    check "network: host" notin composeText
     check "coworld-lantern" in readRepoFile(".github/workflows/ci.yml")
 
   test "config_schema declares num_agents and every knob the server reads":

@@ -11,14 +11,18 @@ const Variants = ["default", "sprint"]
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len != 5:
-    quit("usage: export_posttrain OUTPUT MATCHES FIRST_SEED VARIANT GAME_VERSION", 1)
+  if args.len notin [5, 7]:
+    quit("usage: export_posttrain OUTPUT MATCHES FIRST_SEED VARIANT GAME_VERSION [PROMPT_VARIANT PROMPT_SEED]", 1)
   let output = args[0]
   let matches = parseInt(args[1])
   let firstSeed = parseInt(args[2])
   let variant = args[3]
   let gameVersion = args[4]
   doAssert gameVersion.len > 0
+  let configured = promptSelection(if args.len == 7:
+    %*{"promptVariant": args[5], "promptSeed": parseInt(args[6])} else: newJObject())
+  doAssert configured.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference},
+    "held-out wording is evaluation only"
   if matches < 10 or firstSeed < 1:
     quit("at least ten matches and a positive first seed are required", 1)
   if variant notin Variants:
@@ -38,6 +42,8 @@ when isMainModule:
     trajectoryRows: seq[string]
     runs = newJArray()
   for seed in firstSeed ..< firstSeed + matches:
+    var selection = configured
+    if selection.variant == pvMixed: selection.seed += seed - firstSeed
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -47,7 +53,8 @@ when isMainModule:
     config.update($runtimeConfig)
     let map = loadMapSpec(config.mapPath)
     let sim = newSim(config, map)
-    let episodeId = "lantern-" & variant & "-" & $seed
+    let episodeId = "lantern-" & variant & "-" & $seed & "-" &
+      $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed
     let trajectory = newDecisionTrajectory(episodeId, "lantern-" & $seed,
       "lantern", gameVersion, sourceRevision)
     var pending: seq[PendingMacro]
@@ -67,7 +74,7 @@ when isMainModule:
           let parsed = parseOrderText($proposed, roleOfSlot(seat, phase.half),
             Point(x: cog.px, y: cog.py), sim.crates)
           let completion = orderJson(parsed)
-          let prompt = %*[{"role": "system", "content": SystemPrompt},
+          let prompt = %*[{"role": "system", "content": systemPromptFor(selection)},
             {"role": "user", "content": userPrompt(view, OperatorPrompt, false)}]
           var evidence = newDecisionAttempt($sim.tick & "-" & $seat & "-teacher",
             "private-view-teacher", aoTeacher)
@@ -75,8 +82,10 @@ when isMainModule:
           evidence.response = %($proposed)
           evidence.parsedAction = completion
           evidence.accepted = true
+          let observation = copy(view)
+          observation["prompt_selection"] = selection.selectionMetadata()
           pending.add(PendingMacro(seat: seat, startTick: sim.tick,
-            decision: Decision(order: parsed, source: osScripted, observation: view,
+            decision: Decision(order: parsed, source: osScripted, observation: observation,
               attempts: @[evidence], selectedAttemptId: some(evidence.attemptId))))
           inc decisionCount
           sim.cogs[seat].order = parsed

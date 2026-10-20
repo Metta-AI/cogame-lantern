@@ -3,7 +3,8 @@
 
 import std/[json, monotimes, options, times]
 import bitworld/decision_trajectory
-import types, sim, orders, baselines, render, labels
+import types, sim, orders, baselines, render, labels, prompts
+export prompts
 
 type
   FallbackNote* = object
@@ -96,7 +97,7 @@ proc playerProposal*(raw, requestId: string, seat, half: int,
     result.cause = fcParseError
     result.evidence.rejectionReason = some(error.msg)
 
-proc decideAll*(sim: Sim, half: int, openSeats: seq[int],
+proc decideAll*(selection: PromptSelection, sim: Sim, half: int, openSeats: seq[int],
                 scripted: seq[ScriptKind], forceScripted: bool,
                 exchange: DecisionExchange): seq[Decision] =
   ## All model seats see one pre-action state. Invalid or missing replies get
@@ -105,6 +106,7 @@ proc decideAll*(sim: Sim, half: int, openSeats: seq[int],
   var pending: seq[int]
   for index, seat in openSeats:
     result[index].observation = seatView(sim, seat)
+    result[index].observation["prompt_selection"] = selection.selectionMetadata()
     let kind = scripted[seat]
     if kind != skNone or forceScripted:
       result[index].order = scriptedOrder(sim, seat, half, kind)
@@ -128,6 +130,7 @@ proc decideAll*(sim: Sim, half: int, openSeats: seq[int],
       let seat = openSeats[index]
       requests.add(%*{
         "type": "decision",
+        "prompt_configuration": {"promptVariant": $selection.variant, "promptSeed": selection.seed},
         "protocol": "lantern.player.v3",
         "decision_id": "lantern-" & $sim.tick & "-" & $seat & "-" & $attempt,
         "slot": seat,
