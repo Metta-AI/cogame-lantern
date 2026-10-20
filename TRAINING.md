@@ -60,3 +60,6 @@ From Metta, use `recipes.external.coworld_metta_rl.train` or
 `["/tmp/lantern-train-bridge", "<source>/coworld_manifest_template.json", "default"]`
 and `players=6`. Replace `default` with `sprint` for the second variant.
 Set a finite timestep limit for either trainer.
+
+Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
+split. Omitted, training, and unrecognized splits reject them.
