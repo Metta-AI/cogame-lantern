@@ -43,7 +43,10 @@ for flow in (
 
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["content-length"])))
-            assert "FINDING AND SCORING" in request["system"]
+            assert (
+                "DETECTION AND SCORING\nUnfound hiders accumulate one hidden tick per tick."
+                in request["system"]
+            )
             slot = int(self.headers["X-Coworld-Player-Slot"])
             assert self.path == "/v1/messages" and slot in range(6)
             assert request["temperature"] == (
