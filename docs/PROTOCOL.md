@@ -263,8 +263,9 @@ acknowledgement grants no platform receipt authority. A player exits after confi
 stop evidence delivery; it does not wait for a public final frame.
 
 Authenticated socket bindings survive disconnect until sealing. Missing stop
-acknowledgements or interruption produce private truncated episodes; normal public
-results are withheld. Native transport retains exact base64 header/body bytes,
+acknowledgements produce private truncated episodes with null participant outcomes.
+Completed games still publish public results and replay; interrupted games do not.
+Native transport retains exact base64 header/body bytes,
 observed status, completeness, and reader-join facts. One monotonic cleanup deadline
 covers private capture followed by public artifacts. Inference stop is irreversible.
 
