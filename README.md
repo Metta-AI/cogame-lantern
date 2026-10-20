@@ -154,3 +154,7 @@ platform-hosted episode or learner reinforcement-learning run.
 Publishing these changes requires the reviewed Metta runtime to be deployed and
 its episode/version/source environment pins verified. The old deployed runtime
 does not supply them. Source modernization alone does not authorize a re-upload.
+
+Game results and replay describe the engine outcome even when a player does not acknowledge shutdown.
+Private training evidence remains truncated, with null participant outcomes, until every native call is accounted for.
+Interrupted or failed games do not publish scores.

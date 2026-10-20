@@ -449,7 +449,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           if status == esCompleted: outcomes else: newJNull())
       state.lastResults = results
       replayData = $buildReplay(state.sim, kinds, results)
-      if joined and not interruptionRequested():
+      if not interruptionRequested() and reason in {erComplete, erDeadline}:
         let final = %*{"done": true, "result": results}
         for slot, socket in state.playerSockets: socket.send($final)
         state.broadcastGlobalLocked()
@@ -460,7 +460,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         of "POST": ahPost
         else: raise newException(LanternError, "trajectory method must be PUT or POST")
       trajectory.writeTrajectoryArtifact(trajectoryUri, cleanupDeadline, httpMethod)
-    if joined and not interruptionRequested():
+    if not interruptionRequested() and reason in {erComplete, erDeadline}:
       if missing.len > 0:
         writeArtifact(getEnv("COGAME_PLAYER_FAILURE_URI"),
           $ %*{"slot": missing[0], "reason": "player never connected", "slots": missing},
