@@ -19,16 +19,17 @@ the recorded revision reproducible. Existing output directories are refused.
 
 Candidates require independent content review. The shared importer owns training
 labels and seed-family splits; wording and game variants share `lantern-SEED`
-families. Source exports do not establish deployed package parity or model quality.
+families. Episode IDs include resolved wording and prompt seed, so matched exports
+can be combined without colliding. Source exports do not establish deployed package parity or model quality.
 
 Set `promptVariant` and `promptSeed` in game configuration or bridge resets.
-The `lantern-rules-v2` bank has five training variants: `canonical`, `plain`,
+The `lantern-rules-v3` bank has five training variants: `canonical`, `plain`,
 `numbered`, `questions`, and `reordered`. `mixed` resolves once per episode using
 the separate prompt seed modulo five. It requires an explicit nonnegative seed.
 The shared rules now use the observation's clock: the old fixed 30/75-second
 claims were false for sprint's 20/45-second acts. Apart from that correction,
 canonical wording remains byte-identical. Complete arena, phase, detection, scoring, and control explanations vary in wording
-and section order. The role-specific action schema stays fixed. Mixed exports cycle
+and section order, with independent text for each alternate. The role-specific action schema stays fixed. Mixed exports cycle
 the five training presentations independently of game seeds.
 
 `heldout-briefing` and `heldout-reference` are evaluation-only variants. Training

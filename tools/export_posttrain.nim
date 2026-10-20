@@ -53,7 +53,8 @@ when isMainModule:
     config.update($runtimeConfig)
     let map = loadMapSpec(config.mapPath)
     let sim = newSim(config, map)
-    let episodeId = "lantern-" & variant & "-" & $seed
+    let episodeId = "lantern-" & variant & "-" & $seed & "-" &
+      $selection.selectedVariant & "-" & $selection.seed
     let trajectory = newDecisionTrajectory(episodeId, "lantern-" & $seed,
       "lantern", gameVersion, sourceRevision)
     var pending: seq[PendingMacro]

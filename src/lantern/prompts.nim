@@ -17,7 +17,7 @@ type
     seed*: int
 
 const
-  PromptBankVersion* = "lantern-rules-v2"
+  PromptBankVersion* = "lantern-rules-v3"
 
 proc promptSelection*(node: JsonNode): PromptSelection =
   if node.kind != JObject:
