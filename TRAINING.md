@@ -19,7 +19,7 @@ the recorded revision reproducible. Existing output directories are refused.
 
 Candidates require independent content review. The shared importer owns training
 labels and seed-family splits; wording and game variants share `lantern-SEED`
-families. Episode IDs include resolved wording and prompt seed, so matched exports
+families. Episode IDs include requested selection, resolved wording, and prompt seed, so matched exports
 can be combined without colliding. Source exports do not establish deployed package parity or model quality.
 
 Set `promptVariant` and `promptSeed` in game configuration or bridge resets.
